@@ -224,7 +224,6 @@ int main(int argc, char *argv[])
 	struct minivtun_msg *nm = (void *)nm_buf;
 	time_t last_recv_ts = 0, last_xmit_ts = 0;
 	int opt, rc;
-#define is_in_p2pcat_mode() (0)
 
 	while ((opt = getopt(argc, argv, "u:U:s:r:l:a:A:m:t:n:o:p:S:e:Nvdh")) != -1) {
 		switch (opt) {
@@ -326,52 +325,43 @@ int main(int argc, char *argv[])
 	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", devname, g_tun_mtu, devname);
 	(void)system(cmd);
 
-	if (is_in_p2pcat_mode()) {
-		/* Mode 1: P2P negotiation mode. */
-		if (!(g_uuid && g_expected_uuid)) {
-			fprintf(stderr, "*** No local or peer address specified, and no both UUIDs specified.\n\n");
-			print_help(argc, argv);
-			exit(1);
-		}
+	/* Mode 2: Regular server or client mode. */
+	if (s_loc_addr && v4pair_to_sockaddr(s_loc_addr, ':', &g_loc_addr) < 0) {
+		fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_loc_addr);
+		exit(1);
+	}
+	if (s_peer_addr && v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
+		fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_peer_addr);
+		exit(1);
+	}
+
+	/* The initial tunnelling connection. */
+	if ((g_sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		exit(1);
+	}
+	if (bind(g_sockfd, (struct sockaddr *)&g_loc_addr, sizeof(g_loc_addr)) < 0) {
+		fprintf(stderr, "*** bind() failed: %s.\n", strerror(errno));
+		exit(1);
+	}
+	set_nonblock(g_sockfd);
+
+	if (is_valid_bind_sin(&g_loc_addr) && is_valid_host_sin(&g_peer_addr)) {
+		printf("P2P-based virtual tunneller (P2P) on %s:%u <-> %s:%u, interface: %s.\n",
+				ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
+				ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s2), ntohs(g_peer_addr.sin_port),
+				devname);
+	} else if (is_valid_bind_sin(&g_loc_addr)) {
+		printf("P2P-based virtual tunneller (Server) on %s:%u, interface: %s.\n",
+				ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
+				devname);
+	} else if (is_valid_host_sin(&g_peer_addr)) {
+		printf("P2P-based virtual tunneller (Client) to %s:%u, interface: %s.\n",
+				ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s1), ntohs(g_peer_addr.sin_port),
+				devname);
 	} else {
-		/* Mode 2: Regular server or client mode. */
-		if (s_loc_addr && v4pair_to_sockaddr(s_loc_addr, ':', &g_loc_addr) < 0) {
-			fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_loc_addr);
-			exit(1);
-		}
-		if (s_peer_addr && v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
-			fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_peer_addr);
-			exit(1);
-		}
-
-		/* The initial tunnelling connection. */
-		if ((g_sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-			fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-			exit(1);
-		}
-		if (bind(g_sockfd, (struct sockaddr *)&g_loc_addr, sizeof(g_loc_addr)) < 0) {
-			fprintf(stderr, "*** bind() failed: %s.\n", strerror(errno));
-			exit(1);
-		}
-		set_nonblock(g_sockfd);
-
-		if (is_valid_bind_sin(&g_loc_addr) && is_valid_host_sin(&g_peer_addr)) {
-			printf("P2P-based virtual tunneller (P2P) on %s:%u <-> %s:%u, interface: %s.\n",
-					ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
-					ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s2), ntohs(g_peer_addr.sin_port),
-					devname);
-		} else if (is_valid_bind_sin(&g_loc_addr)) {
-			printf("P2P-based virtual tunneller (Server) on %s:%u, interface: %s.\n",
-					ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
-					devname);
-		} else if (is_valid_host_sin(&g_peer_addr)) {
-			printf("P2P-based virtual tunneller (Client) to %s:%u, interface: %s.\n",
-					ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s1), ntohs(g_peer_addr.sin_port),
-					devname);
-		} else {
-			fprintf(stderr, "*** No valid local or peer address can be used.\n");
-			exit(1);
-		}
+		fprintf(stderr, "*** No valid local or peer address can be used.\n");
+		exit(1);
 	}
 
 	/* Run in background. */
@@ -386,17 +376,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (is_in_p2pcat_mode()) {
-		/* Mode 1: Negotiate to get the session tuple before running VPN. */
-		/* Long wait after daemonizing. */
-		//p2pcat_negotiate_until_ok(g_uuid, g_expected_uuid, &g_loc_addr, &g_peer_addr,
-		//		&g_sockfd, gs_p2pcatd_server, 3);
-		//last_recv_ts = last_xmit_ts = time(NULL);
-	} else {
-		/* Mode 2: Regular server or client mode. */
-		/* NOTICE: Setting 'last_recv_ts' to 0 ensures a NOOP packet is sent 1s after startup. */
-		last_recv_ts = last_xmit_ts = 0 /*time(NULL)*/;
-	}
+	/* NOTICE: Setting 'last_recv_ts' to 0 ensures a NOOP packet is sent 1s after startup. */
+	last_recv_ts = last_xmit_ts = 0 /*time(NULL)*/;
 
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGINT, __cleanup_and_exit);
@@ -430,20 +411,11 @@ int main(int argc, char *argv[])
 
 		/* No packets received from peer for long time, connection is dead. */
 		if (current_ts - last_recv_ts > g_renegotiate_timeo) {
-			if (is_in_p2pcat_mode()) {
-				/* P2P negotiation mode: Call peer and reconnect. */
-				//p2pcat_negotiate_until_ok(g_uuid, g_expected_uuid, &g_loc_addr, &g_peer_addr,
-				//		&g_sockfd, gs_p2pcatd_server, 2);
-				//last_recv_ts = last_xmit_ts = current_ts = time(NULL);
-				/* NOTICE: The fd_set cannot be handled this time since 'g_sockfd' might be replaced. */
-				//continue;
-			} else {
+			if (s_peer_addr) {
 				/* Client mode: Update server's DNS resolution in case it changes. */
-				if (s_peer_addr) {
-					if (v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
-						fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_peer_addr);
-						continue;
-					}
+				if (v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
+					fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_peer_addr);
+					continue;
 				}
 			}
 		}
@@ -490,7 +462,7 @@ int main(int argc, char *argv[])
 			last_recv_ts = current_ts;
 
 			/* Learn peer address on each incoming packet if it was not specified (server mode). */
-			if (!is_in_p2pcat_mode() && s_peer_addr == NULL)
+			if (s_peer_addr == NULL)
 				g_peer_addr = real_peer_addr;
 
 			switch (nm->hdr.opcode) {
