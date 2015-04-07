@@ -22,13 +22,16 @@
 #include <openssl/aes.h>
 #include <openssl/md5.h>
 
+#include "list.h"
 #include "minivtun.h"
 
-static const char *g_uuid = NULL;
-static const char *g_expected_uuid = NULL;
+#define NM_PI_BUFFER_SIZE  (2048)
+
+static char g_devname[20];
 static const char *g_log_file = NULL;
 static const char *g_pid_file = NULL;
-static const char *g_status_file = NULL;
+static const char *s_loc_addr = NULL;
+static const char *s_peer_addr = NULL;
 static unsigned g_tun_mtu = 1408;
 static unsigned g_keepalive_timeo = 7;
 static unsigned g_renegotiate_timeo = 26;
@@ -121,17 +124,6 @@ static int do_daemonize(void)
 	return 0;
 }
 
-static inline void minivtun_msg_set_uuids(struct minivtun_msg *nm,
-		const char *src_uuid, const char *dst_uuid)
-{
-	memset(nm->hdr.src_uuid, 0x0, MINIVTUN_UUID_SIZE);
-	memset(nm->hdr.dst_uuid, 0x0, MINIVTUN_UUID_SIZE);
-	if (src_uuid)
-		strncpy(nm->hdr.src_uuid, src_uuid, MINIVTUN_UUID_SIZE);
-	if (dst_uuid)
-		strncpy(nm->hdr.dst_uuid, dst_uuid, MINIVTUN_UUID_SIZE);
-}
-
 static int tun_alloc(char *dev)
 {
 	struct ifreq ifr;
@@ -189,50 +181,452 @@ static void print_help(int argc, char *argv[])
 static int g_tunfd = -1, g_sockfd = -1;
 static struct sockaddr_in g_loc_addr, g_peer_addr;
 
-static void __cleanup_and_exit(int sig)
+static void cleanup_on_exit(int sig)
 {
 	if (g_sockfd >= 0 && is_valid_host_sin(&g_peer_addr)) {
-		struct minivtun_msg nm;
+		struct minivtun_msg nmsg;
 		int i;
 
-		memset(&nm, 0x0, sizeof(nm));
-		nm.hdr.ver = 0;
-		nm.hdr.opcode = MINIVTUN_MSG_DISCONNECT;
-		minivtun_msg_set_uuids(&nm, g_uuid, g_expected_uuid);
-		nm.disconnect.rsv = 0;
+		memset(&nmsg, 0x0, sizeof(nmsg));
+		nmsg.hdr.opcode = MINIVTUN_MSG_DISCONNECT;
 		for (i = 0; i < 2; i++) {
-			sendto(g_sockfd, &nm, MINIVTUN_MSG_BASIC_HLEN + sizeof(nm.disconnect), 0,
-					(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
+			sendto(g_sockfd, &nmsg, MINIVTUN_MSG_BASIC_HLEN, 0,
+				(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
 		}
 		fprintf(stderr, "Notification sent to peer.\n");
 	}
 	if (g_pid_file)
 		unlink(g_pid_file);
-	if (g_status_file)
-		unlink(g_status_file);
 	exit(sig);
 }
 
+/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
+
+static int minivtun_client(void)
+{
+	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
+	struct minivtun_msg *nmsg = (void *)net_buffer;
+	struct tun_pi *pi = (void *)tun_buffer;
+	time_t last_recv_ts = 0, last_xmit_ts = 0;
+	char s1[20];
+	int rc;
+
+	printf("Mini virtual tunnelling (Client) to %s:%u, interface: %s.\n",
+			ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s1), ntohs(g_peer_addr.sin_port),
+			g_devname);
+
+	/* NOTICE: Setting 'last_recv_ts' to 0 ensures a NOOP packet is sent 1s after startup. */
+	last_recv_ts = last_xmit_ts = 0 /*time(NULL)*/;
+
+	for (;;) {
+		fd_set rset;
+		struct timeval timeo;
+		size_t ip_dlen, ready_dlen;
+		time_t current_ts;
+
+		FD_ZERO(&rset);
+		FD_SET(g_tunfd, &rset);
+		FD_SET(g_sockfd, &rset);
+
+		timeo.tv_sec = 1;
+		timeo.tv_usec = 0;
+
+		rc = select((g_tunfd > g_sockfd ? g_tunfd : g_sockfd) + 1, &rset, NULL, NULL, &timeo);
+		if (rc < 0) {
+			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
+			exit(1);
+		}
+
+		/* Check connection state on each chance. */
+		current_ts = time(NULL);
+		if (last_recv_ts > current_ts)
+			last_recv_ts = current_ts;
+		if (last_xmit_ts > current_ts)
+			last_xmit_ts = current_ts;
+
+		/* Connection timed out, try reconnecting. */
+		if (current_ts - last_recv_ts > g_renegotiate_timeo) {
+			if (v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
+				fprintf(stderr, "*** Failed to resolve '%s'.\n", s_peer_addr);
+				continue;
+			}
+		}
+
+		/* Packet receive timed out, send keep-alive packet. */
+		if (current_ts - last_xmit_ts > g_keepalive_timeo) {
+			nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
+			sendto(g_sockfd, nmsg, MINIVTUN_MSG_BASIC_HLEN, 0,
+					(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
+			last_xmit_ts = current_ts;
+		}
+
+		/* No result from select(), do nothing. */
+		if (rc == 0)
+			continue;
+
+		if (FD_ISSET(g_sockfd, &rset)) {
+			struct sockaddr_in real_peer_addr;
+			socklen_t real_peer_alen = sizeof(real_peer_addr);
+
+			rc = recvfrom(g_sockfd, net_buffer, NM_PI_BUFFER_SIZE, 0,
+					(struct sockaddr *)&real_peer_addr, &real_peer_alen);
+			if (rc < 0 || rc < MINIVTUN_MSG_BASIC_HLEN)
+				goto out1;
+
+			/* FIXME: Verify password. */
+			//
+			//
+
+			last_recv_ts = current_ts;
+
+			switch (nmsg->hdr.opcode) {
+			case MINIVTUN_MSG_IPDATA:
+				/* No packet is shorter than a 20-byte IPv4 header. */
+				if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+					break;
+				ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
+				pi->flags = 0;
+				pi->proto = nmsg->ipdata.proto;
+				ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
+				if (g_crypto_passwd) {
+					bytes_decrypt(pi + 1, nmsg->ipdata.data, &ready_dlen);
+					/* Drop incomplete IP packets. */
+					if (ready_dlen < ip_dlen)
+						break;
+				} else {
+					/* Drop incomplete IP packets. */
+					if (ready_dlen < ip_dlen)
+						break;
+					memcpy(pi + 1, nmsg->ipdata.data, ip_dlen);
+				}
+				rc = write(g_tunfd, pi, sizeof(struct tun_pi) + ip_dlen);
+				break;
+			case MINIVTUN_MSG_DISCONNECT:
+				/* NOTICE: To instantly know connection closed in next loop. */
+				last_recv_ts = last_xmit_ts = 0;
+				break;
+			}
+			out1: ;
+		}
+
+		if (FD_ISSET(g_tunfd, &rset)) {
+			rc = read(g_tunfd, tun_buffer, NM_PI_BUFFER_SIZE);
+			if (rc < 0)
+				break;
+
+			switch (ntohs(pi->proto)) {
+			case ETH_P_IP:
+			case ETH_P_IPV6:
+				ip_dlen = (size_t)rc - sizeof(struct tun_pi);
+				nmsg->hdr.opcode = MINIVTUN_MSG_IPDATA;
+				nmsg->ipdata.proto = pi->proto;
+				nmsg->ipdata.ip_dlen = htons(ip_dlen);
+				if (g_crypto_passwd) {
+					ready_dlen = ip_dlen;
+					bytes_encrypt(nmsg->ipdata.data, pi + 1, &ready_dlen);
+				} else {
+					memcpy(nmsg->ipdata.data, pi + 1, ip_dlen);
+					ready_dlen = ip_dlen;
+				}
+				/* Server sends to peer after it has learned client address. */
+				rc = sendto(g_sockfd, net_buffer, MINIVTUN_MSG_IPDATA_OFFSET + ready_dlen, 0,
+						(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
+				last_xmit_ts = current_ts;
+				break;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#define VIRTUAL_ADDR_HASH_SIZE (1 << 8)
+static struct list_head virt_addr_hbase[VIRTUAL_ADDR_HASH_SIZE];
+static size_t virt_addr_hlen = 0;
+
+struct l3_addr {
+	unsigned char af;
+	union {
+		struct in_addr ip;
+		struct in6_addr ip6;
+	};
+};
+
+struct tun_client {
+	struct list_head list;
+	struct l3_addr virt_addr;
+	struct sockaddr_in real_addr;
+	time_t last_recv;
+	time_t last_xmit;
+};
+
+static inline unsigned int l3_addr_hash(const struct l3_addr *addr)
+{
+	if (addr->af == AF_INET) {
+		return (unsigned int)addr->af + ntohl(addr->ip.s_addr);
+	} else {
+		return (unsigned int)addr->af +
+			ntohl(addr->ip6.s6_addr32[0]) + ntohl(addr->ip6.s6_addr32[1]) +
+			ntohl(addr->ip6.s6_addr32[2]) + ntohl(addr->ip6.s6_addr32[3]);
+	}
+}
+
+static inline int l3_addr_comp(
+		const struct l3_addr *a1, const struct l3_addr *a2)
+{
+	if (a1->af != a2->af)
+		return 1;
+
+	if (a1->af == AF_INET) {
+		if (a1->ip.s_addr == a2->ip.s_addr) {
+			return 0;
+		} else {
+			return 1;
+		}
+	} else {
+		if (a1->ip6.s6_addr32[0] == a2->ip6.s6_addr32[0] &&
+			a1->ip6.s6_addr32[1] == a2->ip6.s6_addr32[1] &&
+			a1->ip6.s6_addr32[2] == a2->ip6.s6_addr32[2] &&
+			a1->ip6.s6_addr32[3] == a2->ip6.s6_addr32[3]) {
+			return 0;
+		} else {
+			return 1;
+		}
+	}
+}
+
+static struct tun_client *tun_client_try_get(const struct l3_addr *vaddr)
+{
+	struct list_head *chain = &virt_addr_hbase[
+		l3_addr_hash(vaddr) & (VIRTUAL_ADDR_HASH_SIZE - 1)];
+	struct tun_client *e;
+
+	list_for_each_entry (e, chain, list) {
+		if (l3_addr_comp(&e->virt_addr, vaddr) == 0)
+			return e;
+	}
+	return NULL;
+}
+
+static struct tun_client *tun_client_get_or_create(
+		const struct l3_addr *vaddr, const struct sockaddr_in *raddr)
+{
+	struct list_head *chain = &virt_addr_hbase[
+		l3_addr_hash(vaddr) & (VIRTUAL_ADDR_HASH_SIZE - 1)];
+	struct tun_client *e;
+
+	list_for_each_entry (e, chain, list) {
+		if (l3_addr_comp(&e->virt_addr, vaddr) == 0)
+			return e;
+	}
+
+	/* Not found, always create new entry. */
+	if ((e = malloc(sizeof(*e))) == NULL) {
+		fprintf(stderr, "*** malloc(): %s.\n", strerror(errno));
+		return NULL;
+	}
+
+	e->virt_addr = *vaddr;
+	e->real_addr = *raddr;
+	list_add_tail(&e->list, chain);
+	return e;
+}
+
+static inline void source_addr_of_ipdata(
+		const void *data, unsigned char af, struct l3_addr *addr)
+{
+	addr->af = af;
+	switch (af) {
+	case AF_INET:
+		memcpy(&addr->ip, (char *)data + 12, 4);
+		break;
+	case AF_INET6:
+		memcpy(&addr->ip6, (char *)data + 8, 16);
+		break;
+	}
+}
+
+static inline void dest_addr_of_ipdata(
+		const void *data, unsigned char af, struct l3_addr *addr)
+{
+	addr->af = af;
+	switch (af) {
+	case AF_INET:
+		memcpy(&addr->ip, (char *)data + 16, 4);
+		break;
+	case AF_INET6:
+		memcpy(&addr->ip6, (char *)data + 24, 16);
+		break;
+	}
+}
+
+
+static int minivtun_server(void)
+{
+	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
+	struct minivtun_msg *nmsg = (void *)net_buffer;
+	struct tun_pi *pi = (void *)tun_buffer;
+	char s1[20];
+	int rc;
+
+	printf("Mini virtual tunnelling (Server) on %s:%u, interface: %s.\n",
+			ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
+			g_devname);
+
+	for (;;) {
+		fd_set rset;
+		struct timeval timeo;
+		size_t ip_dlen, ready_dlen;
+		time_t current_ts;
+
+		FD_ZERO(&rset);
+		FD_SET(g_tunfd, &rset);
+		FD_SET(g_sockfd, &rset);
+
+		timeo.tv_sec = 1;
+		timeo.tv_usec = 0;
+
+		rc = select((g_tunfd > g_sockfd ? g_tunfd : g_sockfd) + 1, &rset, NULL, NULL, &timeo);
+		if (rc < 0) {
+			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
+			exit(1);
+		}
+
+		/* Check connection state on each chance. */
+		current_ts = time(NULL);
+
+		/* No result from select(), do nothing. */
+		if (rc == 0)
+			continue;
+
+		if (FD_ISSET(g_sockfd, &rset)) {
+			struct sockaddr_in real_peer_addr;
+			socklen_t real_peer_alen = sizeof(real_peer_addr);
+			unsigned char af = 0;
+			struct l3_addr virt_addr;
+			struct tun_client *ce;
+
+			rc = recvfrom(g_sockfd, net_buffer, NM_PI_BUFFER_SIZE, 0,
+					(struct sockaddr *)&real_peer_addr, &real_peer_alen);
+			if (rc < 0 || rc < MINIVTUN_MSG_BASIC_HLEN)
+				goto out1;
+
+			/* FIXME: Verify password. */
+			//
+			//
+
+			switch (nmsg->hdr.opcode) {
+			case MINIVTUN_MSG_IPDATA:
+				if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
+					af = AF_INET;
+					/* No packet is shorter than a 20-byte IPv4 header. */
+					if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+						break;
+				} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
+					af = AF_INET6;
+					if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 40)
+						break;
+				} else {
+					fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+					break;
+				}
+
+				ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
+				ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
+				/* Drop incomplete IP packets. */
+				if (ready_dlen < ip_dlen)
+					break;
+
+				source_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
+				if ((ce = tun_client_get_or_create(&virt_addr, &real_peer_addr)) == NULL)
+					break;
+				ce->last_recv = current_ts;
+				pi->flags = 0;
+				pi->proto = nmsg->ipdata.proto;
+				memcpy(pi + 1, nmsg->ipdata.data, ip_dlen);
+
+				rc = write(g_tunfd, pi, sizeof(struct tun_pi) + ip_dlen);
+				break;
+			}
+			out1: ;
+		}
+
+		if (FD_ISSET(g_tunfd, &rset)) {
+			unsigned char af = 0;
+			struct l3_addr virt_addr;
+			struct tun_client *ce;
+
+			rc = read(g_tunfd, tun_buffer, NM_PI_BUFFER_SIZE);
+			if (rc < 0)
+				break;
+
+			switch (ntohs(pi->proto)) {
+			case ETH_P_IP:
+			case ETH_P_IPV6:
+				ip_dlen = (size_t)rc - sizeof(struct tun_pi);
+				memcpy(nmsg->ipdata.data, pi + 1, ip_dlen);
+				ready_dlen = ip_dlen;
+
+				if (pi->proto == htons(ETH_P_IP)) {
+					af = AF_INET;
+					if (ip_dlen < 20)
+						break;
+				} else if (pi->proto == htons(ETH_P_IPV6)) {
+					af = AF_INET6;
+					if (ip_dlen < 40)
+						break;
+				} else {
+					fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+					break;
+				}
+
+				dest_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
+				if ((ce = tun_client_try_get(&virt_addr)) == NULL)
+					break;
+
+				nmsg->hdr.opcode = MINIVTUN_MSG_IPDATA;
+				nmsg->ipdata.proto = pi->proto;
+				nmsg->ipdata.ip_dlen = htons(ip_dlen);
+				rc = sendto(g_sockfd, net_buffer, MINIVTUN_MSG_IPDATA_OFFSET + ready_dlen, 0,
+						(struct sockaddr *)&ce->real_addr, sizeof(ce->real_addr));
+				ce->last_xmit = current_ts;
+				break;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
+
 int main(int argc, char *argv[])
 {
-	const char *s_loc_addr = NULL, *s_peer_addr = NULL,
-		*tun_ip_set = NULL, *tun_ip6_set = NULL;
-#define NM_PI_BUFFER_SIZE  (2048)
-	char devname[20] = "", pi_buf[NM_PI_BUFFER_SIZE + 64],
-		nm_buf[NM_PI_BUFFER_SIZE + 64], s1[20], s2[20], *cmd = pi_buf;
-	struct tun_pi *pi = (void *)pi_buf;
-	struct minivtun_msg *nm = (void *)nm_buf;
-	time_t last_recv_ts = 0, last_xmit_ts = 0;
-	int opt, rc;
+	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
+	char cmd[100];
+	int opt;
 
-	while ((opt = getopt(argc, argv, "u:U:s:r:l:a:A:m:t:n:o:p:S:e:Nvdh")) != -1) {
+	while ((opt = getopt(argc, argv, "s:r:l:a:A:m:t:n:o:p:S:e:Nvdh")) != -1) {
 		switch (opt) {
-		case 'u':
-			g_uuid = optarg;
-			break;
-		case 'U':
-			g_expected_uuid = optarg;
-			break;
 		case 'l':
 			s_loc_addr = optarg;
 			break;
@@ -252,17 +646,14 @@ int main(int argc, char *argv[])
 			g_keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
 			break;
 		case 'n':
-			strncpy(devname, optarg, sizeof(devname) - 1);
-			devname[sizeof(devname) - 1] = '\0';
+			strncpy(g_devname, optarg, sizeof(g_devname) - 1);
+			g_devname[sizeof(g_devname) - 1] = '\0';
 			break;
 		case 'o':
 			g_log_file = optarg;
 			break;
 		case 'p':
 			g_pid_file = optarg;
-			break;
-		case 'S':
-			g_status_file = optarg;
 			break;
 		case 'e':
 			g_crypto_passwd = optarg;
@@ -292,9 +683,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "*** WARNING: Tunnel data will be transmitted without encryption.\n");
 	}
 
-	if (strlen(devname) == 0)
-		strcpy(devname, "p2p%d");
-	if ((g_tunfd = tun_alloc(devname)) < 0) {
+	if (strlen(g_devname) == 0)
+		strcpy(g_devname, "p2p%d");
+	if ((g_tunfd = tun_alloc(g_devname)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -311,18 +702,18 @@ int main(int argc, char *argv[])
 		s_lip[s_rip - tun_ip_set] = '\0';
 		s_rip++;
 
-		sprintf(cmd, "ifconfig %s %s pointopoint %s", devname, s_lip, s_rip);
+		sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
 		(void)system(cmd);
 	}
 
 	/* Configure IPv6 address if set. */
 	if (tun_ip6_set) {
-		sprintf(cmd, "ifconfig %s add %s", devname, tun_ip6_set);
+		sprintf(cmd, "ifconfig %s add %s", g_devname, tun_ip6_set);
 		(void)system(cmd);
 	}
 
 	/* Always bring it up with proper MTU size. */
-	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", devname, g_tun_mtu, devname);
+	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", g_devname, g_tun_mtu, g_devname);
 	(void)system(cmd);
 
 	/* Mode 2: Regular server or client mode. */
@@ -346,24 +737,6 @@ int main(int argc, char *argv[])
 	}
 	set_nonblock(g_sockfd);
 
-	if (is_valid_bind_sin(&g_loc_addr) && is_valid_host_sin(&g_peer_addr)) {
-		printf("P2P-based virtual tunneller (P2P) on %s:%u <-> %s:%u, interface: %s.\n",
-				ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
-				ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s2), ntohs(g_peer_addr.sin_port),
-				devname);
-	} else if (is_valid_bind_sin(&g_loc_addr)) {
-		printf("P2P-based virtual tunneller (Server) on %s:%u, interface: %s.\n",
-				ipv4_htos(ntohl(g_loc_addr.sin_addr.s_addr), s1), ntohs(g_loc_addr.sin_port),
-				devname);
-	} else if (is_valid_host_sin(&g_peer_addr)) {
-		printf("P2P-based virtual tunneller (Client) to %s:%u, interface: %s.\n",
-				ipv4_htos(ntohl(g_peer_addr.sin_addr.s_addr), s1), ntohs(g_peer_addr.sin_port),
-				devname);
-	} else {
-		fprintf(stderr, "*** No valid local or peer address can be used.\n");
-		exit(1);
-	}
-
 	/* Run in background. */
 	if (g_is_daemon)
 		do_daemonize();
@@ -376,155 +749,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* NOTICE: Setting 'last_recv_ts' to 0 ensures a NOOP packet is sent 1s after startup. */
-	last_recv_ts = last_xmit_ts = 0 /*time(NULL)*/;
-
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGINT, __cleanup_and_exit);
-	signal(SIGTERM, __cleanup_and_exit);
-
-	for (;;) {
-		fd_set rset;
-		struct timeval timeo;
-		size_t ip_dlen, ready_dlen;
-		time_t current_ts;
-
-		FD_ZERO(&rset);
-		FD_SET(g_tunfd, &rset);
-		FD_SET(g_sockfd, &rset);
-
-		timeo.tv_sec = 1;
-		timeo.tv_usec = 0;
-
-		rc = select((g_tunfd > g_sockfd ? g_tunfd : g_sockfd) + 1, &rset, NULL, NULL, &timeo);
-		if (rc < 0) {
-			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
-			exit(1);
-		}
-
-		/* Check connection state at each chance. */
-		current_ts = time(NULL);
-		if (last_recv_ts > current_ts)
-			last_recv_ts = current_ts;
-		if (last_xmit_ts > current_ts)
-			last_xmit_ts = current_ts;
-
-		/* No packets received from peer for long time, connection is dead. */
-		if (current_ts - last_recv_ts > g_renegotiate_timeo) {
-			if (s_peer_addr) {
-				/* Client mode: Update server's DNS resolution in case it changes. */
-				if (v4pair_to_sockaddr(s_peer_addr, ':', &g_peer_addr) < 0) {
-					fprintf(stderr, "*** Unable to resolve address pair: %s.\n", s_peer_addr);
-					continue;
-				}
-			}
-		}
-
-		/* No packets sent to peer for more than 'last_xmit_ts', send a 'NOOP'. */
-		if (current_ts - last_xmit_ts > g_keepalive_timeo) {
-			/* Timed out, send a keep-alive packet. */
-			nm->hdr.ver = 0;
-			nm->hdr.opcode = MINIVTUN_MSG_NOOP;
-			minivtun_msg_set_uuids(nm, g_uuid, g_expected_uuid);
-			nm->noop.rsv = 0;
-			if (g_peer_addr.sin_addr.s_addr && g_peer_addr.sin_port) {
-				sendto(g_sockfd, nm, MINIVTUN_MSG_BASIC_HLEN + sizeof(nm->noop), 0,
-						(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
-				last_xmit_ts = current_ts;
-			}
-		}
-
-		/* Nothing more to do on timeout. */
-		if (rc == 0)
-			continue;
-
-		if (FD_ISSET(g_sockfd, &rset)) {
-			struct sockaddr_in real_peer_addr;
-			socklen_t real_peer_alen = sizeof(real_peer_addr);
-
-			rc = recvfrom(g_sockfd, nm_buf, NM_PI_BUFFER_SIZE, 0,
-					(struct sockaddr *)&real_peer_addr, &real_peer_alen);
-			if (rc < 0)
-				goto out1;
-			if (rc < MINIVTUN_MSG_BASIC_HLEN)
-				goto out1;
-
-			/* Check identities of this packet. */
-			if ((g_uuid && strncmp(nm->hdr.dst_uuid, g_uuid, MINIVTUN_UUID_SIZE) != 0) ||
-				(g_expected_uuid && strncmp(nm->hdr.src_uuid, g_expected_uuid, MINIVTUN_UUID_SIZE) != 0)) {
-				fprintf(stderr, "*** Untrusted UDP message from %s:%u.\n",
-						ipv4_htos(ntohl(real_peer_addr.sin_addr.s_addr), s1),
-						ntohs(real_peer_addr.sin_port));
-				goto out1;
-			}
-
-			/* Update the time each time it receives from peer. */
-			last_recv_ts = current_ts;
-
-			/* Learn peer address on each incoming packet if it was not specified (server mode). */
-			if (s_peer_addr == NULL)
-				g_peer_addr = real_peer_addr;
-
-			switch (nm->hdr.opcode) {
-			case MINIVTUN_MSG_IPDATA:
-				/* No packet is shorter than a 20-byte IPv4 header. */
-				if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 20)
-					goto out1;
-				ip_dlen = ntohs(nm->ipdata.ip_dlen);
-				pi->flags = 0;
-				pi->proto = nm->ipdata.proto;
-				ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
-				if (g_crypto_passwd) {
-					bytes_decrypt(pi + 1, nm->ipdata.data, &ready_dlen);
-					/* Drop truncated packets. */
-					if (ready_dlen < ip_dlen)
-						goto out1;
-				} else {
-					/* Drop truncated packets. */
-					if (ready_dlen < ip_dlen)
-						goto out1;
-					memcpy(pi + 1, nm->ipdata.data, ip_dlen);
-				}
-				rc = write(g_tunfd, pi, sizeof(struct tun_pi) + ip_dlen);
-				break;
-			case MINIVTUN_MSG_DISCONNECT:
-				/* NOTICE: To let next loop instantly know the connection is dead. */
-				last_recv_ts = last_xmit_ts = 0;
-				break;
-			}
-out1:		;
-		}
-
-		if (FD_ISSET(g_tunfd, &rset)) {
-			rc = read(g_tunfd, pi_buf, NM_PI_BUFFER_SIZE);
-			if (rc < 0)
-				break;
-
-			switch (ntohs(pi->proto)) {
-			case ETH_P_IP:
-			case ETH_P_IPV6:
-				ip_dlen = (size_t)rc - sizeof(struct tun_pi);
-				nm->hdr.opcode = MINIVTUN_MSG_IPDATA;
-				minivtun_msg_set_uuids(nm, g_uuid, g_expected_uuid);
-				nm->ipdata.proto = pi->proto;
-				nm->ipdata.ip_dlen = htons(ip_dlen);
-				if (g_crypto_passwd) {
-					ready_dlen = ip_dlen;
-					bytes_encrypt(nm->ipdata.data, pi + 1, &ready_dlen);
-				} else {
-					memcpy(nm->ipdata.data, pi + 1, ip_dlen);
-					ready_dlen = ip_dlen;
-				}
-				/* Server sends to peer after it has learned client address. */
-				if (g_peer_addr.sin_addr.s_addr && g_peer_addr.sin_port) {
-					rc = sendto(g_sockfd, nm_buf, MINIVTUN_MSG_IPDATA_OFFSET + ready_dlen, 0,
-							(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
-					last_xmit_ts = current_ts;
-				}
-				break;
-			}
-		}
+	if (is_valid_bind_sin(&g_loc_addr)) {
+		minivtun_server();
+	} else if (is_valid_host_sin(&g_peer_addr)) {
+		minivtun_client();
+	} else {
+		fprintf(stderr, "*** No valid local or peer address can be used.\n");
+		exit(1);
 	}
+
 
 	return 0;
 }

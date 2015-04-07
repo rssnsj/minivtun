@@ -35,23 +35,16 @@ enum {
 
 struct minivtun_msg {
 	struct {
-		__u8 ver;  /* Unused */
+		char passwd_md5sum[16];
 		__u8 opcode;
-		char src_uuid[MINIVTUN_UUID_SIZE];
-		char dst_uuid[MINIVTUN_UUID_SIZE];
 	}  __attribute__((packed)) hdr;
+
 	union {
-		struct {
-			__u8 rsv;
-		} __attribute__((packed)) noop;
 		struct {
 			__be16 proto;   /* ETH_P_IP or ETH_P_IPV6 */
 			__be16 ip_dlen; /* Total length of IP/IPv6 data */
 			char data[1024 * 8];
 		} __attribute__((packed)) ipdata;
-		struct {
-			__u8 rsv;
-		} __attribute__((packed)) disconnect;
 	};
 } __attribute__((packed));
 
@@ -68,23 +61,6 @@ static inline char *ipv4_htos(uint32_t u, char *s)
 		(int)(u >> 24) & 0xff, (int)(u >> 16) & 0xff,
 		(int)(u >> 8) & 0xff, (int)u & 0xff);
 	return s;
-}
-
-static inline bool is_public_ip(uint32_t ip)
-{
-	if ((ip & 0xff000000) == 0x00000000)
-		return false;
-	if ((ip & 0xff000000) == 0x0a000000)
-		return false;
-	if ((ip & 0xff000000) == 0x7f000000)
-		return false;
-	if ((ip & 0xfff00000) == 0xac100000)
-		return false;
-	if ((ip & 0xe0000000) == 0xe0000000)
-		return false;
-	if ((ip & 0xffff0000) == 0xc0a80000)
-		return false;
-	return true;
 }
 
 /* is_valid_bind_sin - Valid local 'sockaddr_in' for bind() */
