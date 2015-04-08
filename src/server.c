@@ -46,20 +46,31 @@ struct tun_client {
 
 #define ADDRMAP_HASH_SIZE (1 << 8)
 static struct list_head addrmap_hbase[ADDRMAP_HASH_SIZE];
-static size_t addrmap_len = 0;
+static size_t addrmap_len;
 
-static inline unsigned int l3_addr_hash(const struct tun_addr *addr)
+static inline void init_addrmap(void)
+{
+	int i;
+	for (i = 0; i < ADDRMAP_HASH_SIZE; i++)
+		INIT_LIST_HEAD(&addrmap_hbase[i]);
+	addrmap_len = 0;
+}
+
+static inline unsigned int tun_addr_hash(const struct tun_addr *addr)
 {
 	if (addr->af == AF_INET) {
 		return (unsigned int)addr->af + ntohl(addr->ip.s_addr);
-	} else {
+	} else if (addr->af == AF_INET6) {
 		return (unsigned int)addr->af +
 			ntohl(addr->ip6.s6_addr32[0]) + ntohl(addr->ip6.s6_addr32[1]) +
 			ntohl(addr->ip6.s6_addr32[2]) + ntohl(addr->ip6.s6_addr32[3]);
+	} else {
+		abort();
+		return 0;
 	}
 }
 
-static inline int l3_addr_comp(
+static inline int tun_addr_comp(
 		const struct tun_addr *a1, const struct tun_addr *a2)
 {
 	if (a1->af != a2->af)
@@ -71,7 +82,7 @@ static inline int l3_addr_comp(
 		} else {
 			return 1;
 		}
-	} else {
+	} else if (a1->af == AF_INET6) {
 		if (a1->ip6.s6_addr32[0] == a2->ip6.s6_addr32[0] &&
 			a1->ip6.s6_addr32[1] == a2->ip6.s6_addr32[1] &&
 			a1->ip6.s6_addr32[2] == a2->ip6.s6_addr32[2] &&
@@ -80,17 +91,20 @@ static inline int l3_addr_comp(
 		} else {
 			return 1;
 		}
+	} else {
+		abort();
+		return 0;
 	}
 }
 
 static struct tun_client *tun_client_try_get(const struct tun_addr *vaddr)
 {
 	struct list_head *chain = &addrmap_hbase[
-		l3_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
+		tun_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
 	struct tun_client *e;
 
 	list_for_each_entry (e, chain, list) {
-		if (l3_addr_comp(&e->virt_addr, vaddr) == 0)
+		if (tun_addr_comp(&e->virt_addr, vaddr) == 0)
 			return e;
 	}
 	return NULL;
@@ -100,11 +114,11 @@ static struct tun_client *tun_client_get_or_create(
 		const struct tun_addr *vaddr, const struct sockaddr_in *raddr)
 {
 	struct list_head *chain = &addrmap_hbase[
-		l3_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
+		tun_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
 	struct tun_client *e;
 
 	list_for_each_entry (e, chain, list) {
-		if (l3_addr_comp(&e->virt_addr, vaddr) == 0)
+		if (tun_addr_comp(&e->virt_addr, vaddr) == 0)
 			return e;
 	}
 
@@ -122,6 +136,12 @@ static struct tun_client *tun_client_get_or_create(
 	return e;
 }
 
+static inline void tun_client_release(struct tun_client *ce)
+{
+	list_del(&ce->list);
+	addrmap_len--;
+}
+
 static inline void source_addr_of_ipdata(
 		const void *data, unsigned char af, struct tun_addr *addr)
 {
@@ -133,6 +153,8 @@ static inline void source_addr_of_ipdata(
 	case AF_INET6:
 		memcpy(&addr->ip6, (char *)data + 8, 16);
 		break;
+	default:
+		abort();
 	}
 }
 
@@ -147,6 +169,8 @@ static inline void dest_addr_of_ipdata(
 	case AF_INET6:
 		memcpy(&addr->ip6, (char *)data + 24, 16);
 		break;
+	default:
+		abort();
 	}
 }
 
@@ -200,6 +224,7 @@ static int network_receiving(int tunfd, int sockfd)
 		if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)) == NULL)
 			return 0;
 		ce->last_recv = current_ts;
+
 		pi->flags = 0;
 		pi->proto = nmsg->ipdata.proto;
 		memcpy(pi + 1, nmsg->ipdata.data, ip_dlen);
@@ -285,6 +310,9 @@ int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair)
 	} else {
 		fprintf(stderr, "*** WARNING: Tunnel data will not be encrypted.\n");
 	}
+
+	/* Initialize address map hash table. */
+	init_addrmap();
 
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
