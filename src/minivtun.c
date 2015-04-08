@@ -25,6 +25,7 @@
 unsigned g_keepalive_timeo = 7;
 unsigned g_reconnect_timeo = 26;
 const char *g_pid_file = NULL;
+const char *g_crypto_passwd = "";
 AES_KEY g_encrypt_key;
 AES_KEY g_decrypt_key;
 
@@ -108,7 +109,6 @@ int main(int argc, char *argv[])
 	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
 	const char *loc_addr_pair = NULL;
 	const char *peer_addr_pair = NULL;
-	const char *crypto_passwd = "";
 	bool in_background = false;
 	char cmd[100];
 	int tunfd, opt;
@@ -141,10 +141,10 @@ int main(int argc, char *argv[])
 			g_pid_file = optarg;
 			break;
 		case 'e':
-			crypto_passwd = optarg;
+			g_crypto_passwd = optarg;
 			break;
 		case 'N':
-			crypto_passwd = NULL;
+			g_crypto_passwd = NULL;
 			break;
 		case 'd':
 			in_background = true;
@@ -210,6 +210,13 @@ int main(int argc, char *argv[])
 	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", g_devname, g_tun_mtu, g_devname);
 	(void)system(cmd);
 
+	if (g_crypto_passwd) {
+		gen_encrypt_key(&g_encrypt_key, g_crypto_passwd);
+		gen_decrypt_key(&g_decrypt_key, g_crypto_passwd);
+	} else {
+		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");
+	}
+
 	/* Run in background. */
 	if (in_background)
 		do_daemonize();
@@ -223,9 +230,9 @@ int main(int argc, char *argv[])
 	}
 
 	if (loc_addr_pair) {
-		run_server(tunfd, crypto_passwd, loc_addr_pair);
+		run_server(tunfd, loc_addr_pair);
 	} else if (peer_addr_pair) {
-		run_client(tunfd, crypto_passwd, peer_addr_pair);
+		run_client(tunfd, peer_addr_pair);
 	} else {
 		fprintf(stderr, "*** No valid local or peer address specified.\n");
 		exit(1);

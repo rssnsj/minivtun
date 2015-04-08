@@ -25,7 +25,6 @@
 #include "list.h"
 #include "minivtun.h"
 
-static AES_KEY encrypt_key, decrypt_key;
 static time_t current_ts = 0;
 
 struct tun_addr {
@@ -44,16 +43,18 @@ struct tun_client {
 	time_t last_xmit;
 };
 
-#define ADDRMAP_HASH_SIZE (1 << 8)
-static struct list_head addrmap_hbase[ADDRMAP_HASH_SIZE];
-static size_t addrmap_len;
+#define VA_MAP_HASH_SIZE  (1 << 8)
+#define VA_MAP_ENTRIES_EACH_WALK  (10)
 
-static inline void init_addrmap(void)
+static struct list_head va_map_hbase[VA_MAP_HASH_SIZE];
+static unsigned va_map_len;
+
+static inline void init_va_map(void)
 {
 	int i;
-	for (i = 0; i < ADDRMAP_HASH_SIZE; i++)
-		INIT_LIST_HEAD(&addrmap_hbase[i]);
-	addrmap_len = 0;
+	for (i = 0; i < VA_MAP_HASH_SIZE; i++)
+		INIT_LIST_HEAD(&va_map_hbase[i]);
+	va_map_len = 0;
 }
 
 static inline unsigned int tun_addr_hash(const struct tun_addr *addr)
@@ -97,10 +98,23 @@ static inline int tun_addr_comp(
 	}
 }
 
+static inline void tun_client_dump(struct tun_client *ce)
+{
+	char s_virt_addr[44] = "", s_real_addr[44] = "";
+
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.ip,
+		s_virt_addr, sizeof(s_virt_addr));
+	inet_ntop(ce->real_addr.sin_family, &ce->real_addr.sin_addr,
+		s_real_addr, sizeof(s_real_addr));
+	printf("[%s] (%s:%u), last_recv: %lu, last_xmit: %lu\n", s_virt_addr,
+		s_real_addr, ntohs(ce->real_addr.sin_port),
+		(unsigned long)ce->last_recv, (unsigned long)ce->last_xmit);
+}
+
 static struct tun_client *tun_client_try_get(const struct tun_addr *vaddr)
 {
-	struct list_head *chain = &addrmap_hbase[
-		tun_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
+	struct list_head *chain = &va_map_hbase[
+		tun_addr_hash(vaddr) & (VA_MAP_HASH_SIZE - 1)];
 	struct tun_client *e;
 
 	list_for_each_entry (e, chain, list) {
@@ -113,8 +127,8 @@ static struct tun_client *tun_client_try_get(const struct tun_addr *vaddr)
 static struct tun_client *tun_client_get_or_create(
 		const struct tun_addr *vaddr, const struct sockaddr_in *raddr)
 {
-	struct list_head *chain = &addrmap_hbase[
-		tun_addr_hash(vaddr) & (ADDRMAP_HASH_SIZE - 1)];
+	struct list_head *chain = &va_map_hbase[
+		tun_addr_hash(vaddr) & (VA_MAP_HASH_SIZE - 1)];
 	struct tun_client *e;
 
 	list_for_each_entry (e, chain, list) {
@@ -133,15 +147,81 @@ static struct tun_client *tun_client_get_or_create(
 	e->virt_addr = *vaddr;
 	e->real_addr = *raddr;
 	list_add_tail(&e->list, chain);
-	addrmap_len++;
+	va_map_len++;
 
+	//tun_client_dump(e);
 	return e;
 }
 
 static inline void tun_client_release(struct tun_client *ce)
 {
+	char s_virt_addr[44], s_real_addr[44];
+
 	list_del(&ce->list);
-	addrmap_len--;
+	va_map_len--;
+
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.ip,
+		s_virt_addr, sizeof(s_virt_addr));
+	inet_ntop(ce->real_addr.sin_family, &ce->real_addr.sin_addr,
+		s_real_addr, sizeof(s_real_addr));
+	printf("Released client [%s - %s:%u].\n", s_virt_addr, s_real_addr,
+		ntohs(ce->real_addr.sin_port));
+
+	free(ce);
+}
+
+static int tun_client_keepalive(struct tun_client *ce, int sockfd)
+{
+	char in_data[32], out_data[32];
+	struct minivtun_msg *in_msg = (struct minivtun_msg *)in_data;
+	void *out_msg;
+	size_t out_len;
+	int rc;
+
+	memset(&in_msg->hdr, 0x0, sizeof(in_msg->hdr));
+	if (g_crypto_passwd) {
+		/* FIXME: Fill correct MD5 sum here. */
+		//
+		//
+		memset(in_msg->hdr.passwd_md5sum, 0x0, sizeof(in_msg->hdr.passwd_md5sum));
+	}
+	in_msg->hdr.opcode = MINIVTUN_MSG_NOOP;
+
+	out_msg = out_data;
+	out_len = sizeof(in_msg->hdr);
+	local_to_netmsg(in_msg, &out_msg, &out_len);
+
+	rc = sendto(sockfd, out_msg, out_len, 0,
+		(struct sockaddr *)&ce->real_addr, sizeof(ce->real_addr));
+
+	/* Update 'last_xmit' only when it's really sent. */
+	if (rc > 0)
+		ce->last_xmit = current_ts;
+
+	return rc;
+}
+
+static void va_map_walk_continue(int sockfd)
+{
+	static unsigned index = 0;
+	unsigned walk_max = VA_MAP_ENTRIES_EACH_WALK, count = 0;
+	struct tun_client *ce, *__ce;
+
+	if (walk_max > va_map_len);
+		walk_max = va_map_len;
+
+	do {
+		list_for_each_entry_safe (ce, __ce, &va_map_hbase[index], list) {
+			//tun_client_dump(ce);
+			if (current_ts - ce->last_recv > g_reconnect_timeo) {
+				tun_client_release(ce);
+			} else if (current_ts - ce->last_xmit > g_keepalive_timeo) {
+				tun_client_keepalive(ce, sockfd);
+			}
+			count++;
+		}
+		index = (index + 1) & (VA_MAP_HASH_SIZE - 1);
+	} while (count < walk_max);
 }
 
 static inline void source_addr_of_ipdata(
@@ -218,11 +298,13 @@ static int network_receiving(int tunfd, int sockfd)
 
 		ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
 		ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
+
 		/* Drop incomplete IP packets. */
 		if (ready_dlen < ip_dlen)
 			return 0;
 
 		source_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
+		//hexdump(&virt_addr.ip, sizeof(virt_addr));
 		if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)) == NULL)
 			return 0;
 		ce->last_recv = current_ts;
@@ -273,7 +355,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 			return 0;
 		}
 
-		dest_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
+		dest_addr_of_ipdata(pi + 1, af, &virt_addr);
 		if ((ce = tun_client_try_get(&virt_addr)) == NULL)
 			return 0;
 
@@ -289,12 +371,13 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	return 0;
 }
 
-int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair)
+int run_server(int tunfd, const char *loc_addr_pair)
 {
 	struct timeval timeo;
 	int sockfd, rc;
 	struct sockaddr_in loc_addr;
 	fd_set rset;
+	time_t last_walk;
 	char s1[20];
 
 	if (v4pair_to_sockaddr(loc_addr_pair, ':', &loc_addr) < 0) {
@@ -306,15 +389,8 @@ int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair)
 			ipv4_htos(ntohl(loc_addr.sin_addr.s_addr), s1), ntohs(loc_addr.sin_port),
 			g_devname);
 
-	if (crypto_passwd) {
-		gen_encrypt_key(&encrypt_key, crypto_passwd);
-		gen_decrypt_key(&decrypt_key, crypto_passwd);
-	} else {
-		fprintf(stderr, "*** WARNING: Tunnel data will not be encrypted.\n");
-	}
-
 	/* Initialize address map hash table. */
-	init_addrmap();
+	init_va_map();
 
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
@@ -326,12 +402,14 @@ int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair)
 	}
 	set_nonblock(sockfd);
 
+	last_walk = time(NULL);
+
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(tunfd, &rset);
 		FD_SET(sockfd, &rset);
 
-		timeo.tv_sec = 1;
+		timeo.tv_sec = 2;
 		timeo.tv_usec = 0;
 
 		rc = select((tunfd > sockfd ? tunfd : sockfd) + 1, &rset, NULL, NULL, &timeo);
@@ -344,15 +422,19 @@ int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair)
 		current_ts = time(NULL);
 
 		/* No result from select(), do nothing. */
-		if (rc == 0)
-			continue;
+		if (rc > 0) {
+			if (FD_ISSET(sockfd, &rset)) {
+				rc = network_receiving(tunfd, sockfd);
+			}
 
-		if (FD_ISSET(sockfd, &rset)) {
-			rc = network_receiving(tunfd, sockfd);
+			if (FD_ISSET(tunfd, &rset)) {
+				rc = tunnel_receiving(tunfd, sockfd);
+			}
 		}
 
-		if (FD_ISSET(tunfd, &rset)) {
-			rc = tunnel_receiving(tunfd, sockfd);
+		if (current_ts - last_walk >= 3) {
+			va_map_walk_continue(sockfd);
+			last_walk = current_ts;
 		}
 	}
 

@@ -17,8 +17,9 @@ enum {
 
 struct minivtun_msg {
 	struct {
-		char passwd_md5sum[16];
 		__u8 opcode;
+		__u8 rsv[3];
+		__u8 passwd_md5sum[16];
 	}  __attribute__((packed)) hdr;
 
 	union {
@@ -40,8 +41,29 @@ extern unsigned g_keepalive_timeo;
 extern const char *g_pid_file;
 extern char g_devname[];
 
-int run_client(int tunfd, const char *crypto_passwd, const char *peer_addr_pair);
-int run_server(int tunfd, const char *crypto_passwd, const char *loc_addr_pair);
+extern AES_KEY g_encrypt_key;
+extern AES_KEY g_decrypt_key;
+extern const char *g_crypto_passwd;
+
+static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
+{
+	if (g_crypto_passwd) {
+		bytes_encrypt(&g_encrypt_key, in, *out, dlen);
+	} else {
+		*out = (void *)in;
+	}
+}
+static inline void netmsg_to_local(const void *in, void **out, size_t *dlen)
+{
+	if (g_crypto_passwd) {
+		bytes_decrypt(&g_decrypt_key, in, *out, dlen);
+	} else {
+		*out = (void *)in;
+	}
+}
+
+int run_client(int tunfd, const char *peer_addr_pair);
+int run_server(int tunfd, const char *loc_addr_pair);
 
 #endif /* __MINIVTUN_H */
 

@@ -24,12 +24,11 @@
 
 #include "minivtun.h"
 
-int run_client(int tunfd, const char *crypto_passwd, const char *peer_addr_pair)
+int run_client(int tunfd, const char *peer_addr_pair)
 {
 	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
 	struct minivtun_msg *nmsg = (void *)net_buffer;
 	struct tun_pi *pi = (void *)tun_buffer;
-	AES_KEY encrypt_key, decrypt_key;
 	time_t last_recv = 0, last_xmit = 0, current_ts;
 	struct timeval timeo;
 	size_t ip_dlen, ready_dlen;
@@ -45,13 +44,6 @@ int run_client(int tunfd, const char *crypto_passwd, const char *peer_addr_pair)
 
 	printf("Mini virtual tunnelling client to %s:%u.\n",
 		ipv4_htos(ntohl(peer_addr.sin_addr.s_addr), s1), ntohs(peer_addr.sin_port));
-
-	if (crypto_passwd) {
-		gen_encrypt_key(&encrypt_key, crypto_passwd);
-		gen_decrypt_key(&decrypt_key, crypto_passwd);
-	} else {
-		fprintf(stderr, "*** WARNING: Tunnel data will not be encrypted.\n");
-	}
 
 	/* The initial tunnelling connection. */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {

@@ -55,7 +55,7 @@ static inline void gen_decrypt_key(AES_KEY *key, const char *passwd)
 #define AES_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
 		0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, }
 
-static inline void bytes_encrypt(AES_KEY *key, void *out, void *in, size_t *dlen)
+static inline void bytes_encrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
 {
 	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
 	size_t remain = *dlen % AES_BLOCK_SIZE;
@@ -67,7 +67,7 @@ static inline void bytes_encrypt(AES_KEY *key, void *out, void *in, size_t *dlen
 	AES_cbc_encrypt(in, out, *dlen, key, (void *)ivec, AES_ENCRYPT);
 }
 
-static inline void bytes_decrypt(AES_KEY *key, void *out, void *in, size_t *dlen)
+static inline void bytes_decrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
 {
 	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
 	size_t remain = *dlen % AES_BLOCK_SIZE;

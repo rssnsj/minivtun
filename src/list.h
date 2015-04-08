@@ -158,6 +158,14 @@ static inline int list_empty(const struct list_head *head)
 	list_entry((ptr)->next, type, member)
 
 /**
+ * list_next_entry - get the next element in list
+ * @pos:	the type * to cursor
+ * @member:	the name of the list_struct within the struct.
+ */
+#define list_next_entry(pos, member) \
+	list_entry((pos)->member.next, typeof(*(pos)), member)
+
+/**
  * list_for_each_entry	-	iterate over list of given type
  * @pos:	the type * to use as a loop cursor.
  * @head:	the head for your list.
@@ -167,5 +175,18 @@ static inline int list_empty(const struct list_head *head)
 	for (pos = list_entry((head)->next, typeof(*pos), member);	\
 	     /*prefetch(pos->member.next),*/ &pos->member != (head); 	\
 	     pos = list_entry(pos->member.next, typeof(*pos), member))
+
+/**
+ * list_for_each_entry_safe - iterate over list of given type safe against removal of list entry
+ * @pos:	the type * to use as a loop cursor.
+ * @n:		another type * to use as temporary storage
+ * @head:	the head for your list.
+ * @member:	the name of the list_struct within the struct.
+ */
+#define list_for_each_entry_safe(pos, n, head, member)			\
+	for (pos = list_first_entry(head, typeof(*pos), member),	\
+		n = list_next_entry(pos, member);			\
+	     &pos->member != (head); 					\
+	     pos = n, n = list_next_entry(n, member))
 
 #endif /* __LIST_H */
