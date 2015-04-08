@@ -1,8 +1,6 @@
 #ifndef __LIST_H
 #define __LIST_H
 
-/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
-
 #include <sys/types.h>
 #include <stddef.h>
 
@@ -169,8 +167,5 @@ static inline int list_empty(const struct list_head *head)
 	for (pos = list_entry((head)->next, typeof(*pos), member);	\
 	     /*prefetch(pos->member.next),*/ &pos->member != (head); 	\
 	     pos = list_entry(pos->member.next, typeof(*pos), member))
-
-
-/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
 
 #endif /* __LIST_H */

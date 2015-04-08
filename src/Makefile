@@ -6,10 +6,10 @@
 
 CC ?= gcc
 CFLAGS += -Wall
-HEADERS = minivtun.h
+HEADERS = minivtun.h library.h list.h
 
-minivtun: minivtun.o
-	$(CC) $(LDFLAGS) -o $@ $< -lcrypto
+minivtun: minivtun.o library.o server.o client.o
+	$(CC) $(LDFLAGS) -o $@ $^ -lcrypto
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c -o $@ $<
