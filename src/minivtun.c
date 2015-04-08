@@ -167,17 +167,36 @@ int main(int argc, char *argv[])
 
 	/* Configure IPv4 address for the interface. */
 	if (tun_ip_set) {
-		char s_lip[20], *s_rip;
+		char s_lip[20], s_rip[20], *sp;
+		struct in_addr raddr;
+		int na = 0;
 
-		if (!(s_rip = strchr(tun_ip_set, '/'))) {
+		if (!(sp = strchr(tun_ip_set, '/'))) {
 			fprintf(stderr, "*** Invalid P-t-P IP pair: %s.\n", tun_ip_set);
 			exit(1);
 		}
-		strncpy(s_lip, tun_ip_set, s_rip - tun_ip_set);
-		s_lip[s_rip - tun_ip_set] = '\0';
-		s_rip++;
+		strncpy(s_lip, tun_ip_set, sp - tun_ip_set);
+		s_lip[sp - tun_ip_set] = '\0';
+		sp++;
+		strncpy(s_rip, sp, sizeof(s_rip));
+		s_rip[sizeof(s_rip) - 1] = '\0';
 
-		sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
+		if (!inet_pton(AF_INET, s_lip, &raddr)) {
+			fprintf(stderr, "*** Invalid local IPv4 address: %s.\n", s_lip);
+			exit(1);
+		}
+		if (inet_pton(AF_INET, s_rip, &raddr)) {
+			sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
+		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
+			uint32_t mask = ~((1 << (32 - na)) - 1);
+			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
+					(mask >> 8) & 0xff, mask & 0xff);
+			sprintf(cmd, "ifconfig %s %s netmask %s", g_devname, s_lip, s_rip);
+		} else {
+			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
+					s_rip);
+			exit(1);
+		}
 		(void)system(cmd);
 	}
 

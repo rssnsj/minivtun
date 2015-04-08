@@ -61,7 +61,8 @@ int run_client(int tunfd, const char *crypto_passwd, const char *peer_addr_pair)
 	set_nonblock(sockfd);
 
 	/* For triggering the first keep-alive packet to be sent. */
-	last_recv = last_xmit = 0 /*time(NULL)*/;
+	last_xmit = 0;
+	last_recv = time(NULL);
 
 	for (;;) {
 		FD_ZERO(&rset);
@@ -84,20 +85,20 @@ int run_client(int tunfd, const char *crypto_passwd, const char *peer_addr_pair)
 		if (last_xmit > current_ts)
 			last_xmit = current_ts;
 
-		/* Connection timed out, try reconnecting. */
-		if (current_ts - last_recv > g_reconnect_timeo) {
-			if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
-				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
-				continue;
-			}
-		}
-
 		/* Packet receive timed out, send keep-alive packet. */
 		if (current_ts - last_xmit > g_keepalive_timeo) {
 			nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
 			sendto(sockfd, nmsg, MINIVTUN_MSG_BASIC_HLEN, 0,
 					(struct sockaddr *)&peer_addr, sizeof(peer_addr));
 			last_xmit = current_ts;
+		}
+
+		/* Connection timed out, try reconnecting. */
+		if (current_ts - last_recv > g_reconnect_timeo) {
+			if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
+				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
+				continue;
+			}
 		}
 
 		/* No result from select(), do nothing. */

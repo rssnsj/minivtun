@@ -118,8 +118,10 @@ static struct tun_client *tun_client_get_or_create(
 	struct tun_client *e;
 
 	list_for_each_entry (e, chain, list) {
-		if (tun_addr_comp(&e->virt_addr, vaddr) == 0)
+		if (tun_addr_comp(&e->virt_addr, vaddr) == 0) {
+			e->real_addr = *raddr;
 			return e;
+		}
 	}
 
 	/* Not found, always create new entry. */
