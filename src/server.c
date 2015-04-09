@@ -339,6 +339,8 @@ static void va_ra_walk_continue(int sockfd)
 		}
 		ra_index = (ra_index + 1) & (RA_SET_HASH_SIZE - 1);
 	} while (ra_count < ra_walk_max);
+
+	printf("Online clients: %u, addresses: %u\n", ra_set_len, va_map_len);
 }
 
 static inline void source_addr_of_ipdata(

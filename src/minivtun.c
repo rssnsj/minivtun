@@ -22,8 +22,8 @@
 
 #include "minivtun.h"
 
-unsigned g_keepalive_timeo = 7;
-unsigned g_reconnect_timeo = 26;
+unsigned g_keepalive_timeo = 13;
+unsigned g_reconnect_timeo = 60;
 const char *g_pid_file = NULL;
 const char *g_crypto_passwd = "";
 char g_crypto_passwd_md5sum[16];
