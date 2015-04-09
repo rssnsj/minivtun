@@ -548,6 +548,17 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	}
 	set_nonblock(sockfd);
 
+	/* Run in background. */
+	if (g_in_background)
+		do_daemonize();
+	if (g_pid_file) {
+		FILE *fp;
+		if ((fp = fopen(g_pid_file, "w"))) {
+			fprintf(fp, "%d\n", (int)getpid());
+			fclose(fp);
+		}
+	}
+
 	last_walk = time(NULL);
 
 	for (;;) {

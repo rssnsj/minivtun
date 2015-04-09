@@ -169,7 +169,6 @@ static int peer_keepalive(int sockfd)
 	return rc;
 }
 
-
 int run_client(int tunfd, const char *peer_addr_pair)
 {
 	struct timeval timeo;
@@ -193,6 +192,18 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		exit(1);
 	}
 	set_nonblock(sockfd);
+
+	/* Run in background. */
+	if (g_in_background)
+		do_daemonize();
+
+	if (g_pid_file) {
+		FILE *fp;
+		if ((fp = fopen(g_pid_file, "w"))) {
+			fprintf(fp, "%d\n", (int)getpid());
+			fclose(fp);
+		}
+	}
 
 	/* For triggering the first keep-alive packet to be sent. */
 	last_xmit = 0;

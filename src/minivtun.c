@@ -32,6 +32,7 @@ AES_KEY g_decrypt_key;
 
 char g_devname[20];
 static unsigned g_tun_mtu = 1408;
+bool g_in_background = false;
 
 static void print_help(int argc, char *argv[])
 {
@@ -110,7 +111,6 @@ int main(int argc, char *argv[])
 	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
 	const char *loc_addr_pair = NULL;
 	const char *peer_addr_pair = NULL;
-	bool in_background = false;
 	char cmd[100];
 	int tunfd, opt;
 
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 			g_crypto_passwd = NULL;
 			break;
 		case 'd':
-			in_background = true;
+			g_in_background = true;
 			break;
 		case 'h':
 			print_help(argc, argv);
@@ -214,20 +214,9 @@ int main(int argc, char *argv[])
 	if (g_crypto_passwd) {
 		gen_encrypt_key(&g_encrypt_key, g_crypto_passwd);
 		gen_decrypt_key(&g_decrypt_key, g_crypto_passwd);
+		gen_string_md5sum(g_crypto_passwd_md5sum, g_crypto_passwd);
 	} else {
 		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");
-	}
-
-	/* Run in background. */
-	if (in_background)
-		do_daemonize();
-
-	if (g_pid_file) {
-		FILE *fp;
-		if ((fp = fopen(g_pid_file, "w"))) {
-			fprintf(fp, "%d\n", (int)getpid());
-			fclose(fp);
-		}
 	}
 
 	if (loc_addr_pair) {

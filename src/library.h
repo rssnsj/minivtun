@@ -28,27 +28,25 @@
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
+static inline void gen_string_md5sum(void *out, const char *in)
+{
+	MD5_CTX ctx;
+	MD5_Init(&ctx);
+	MD5_Update(&ctx, in, strlen(in));
+	MD5_Final(out, &ctx);
+}
+
 static inline void gen_encrypt_key(AES_KEY *key, const char *passwd)
 {
-	unsigned char md[16];
-	MD5_CTX ctx;
-
-	MD5_Init(&ctx);
-	MD5_Update(&ctx, passwd, strlen(passwd));
-	MD5_Final(md, &ctx);
-
+	char md[16];
+	gen_string_md5sum(md, passwd);
 	AES_set_encrypt_key((void *)md, 128, key);
 }
 
 static inline void gen_decrypt_key(AES_KEY *key, const char *passwd)
 {
-	unsigned char md[16];
-	MD5_CTX ctx;
-
-	MD5_Init(&ctx);
-	MD5_Update(&ctx, passwd, strlen(passwd));
-	MD5_Final(md, &ctx);
-
+	char md[16];
+	gen_string_md5sum(md, passwd);
 	AES_set_decrypt_key((void *)&md, 128, key);
 }
 

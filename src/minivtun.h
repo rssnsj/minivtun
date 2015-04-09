@@ -40,6 +40,7 @@ extern unsigned g_reconnect_timeo;
 extern unsigned g_keepalive_timeo;
 extern const char *g_pid_file;
 extern char g_devname[];
+extern bool g_in_background;
 
 extern AES_KEY g_encrypt_key;
 extern AES_KEY g_decrypt_key;
