@@ -85,29 +85,6 @@ int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr);
 
 int do_daemonize(void);
 
-static inline char *ipv4_htos(uint32_t u, char *s)
-{
-	static char ss[20];
-	if (!s) s = ss;
-	sprintf(s, "%d.%d.%d.%d",
-		(int)(u >> 24) & 0xff, (int)(u >> 16) & 0xff,
-		(int)(u >> 8) & 0xff, (int)u & 0xff);
-	return s;
-}
-
-/* is_valid_bind_sin - Valid local 'sockaddr_in' for bind() */
-static inline bool is_valid_bind_sin(struct sockaddr_in *addr)
-{
-	return (addr->sin_family == AF_INET && addr->sin_port);
-}
-
-/* is_valid_host_sin - Valid host 'sockaddr_in' for connect() and sendto() */
-static inline bool is_valid_host_sin(struct sockaddr_in *addr)
-{
-	return (addr->sin_family == AF_INET &&
-			addr->sin_addr.s_addr && addr->sin_port);
-}
-
 static inline int set_nonblock(int sockfd)
 {
 	if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFD, 0)|O_NONBLOCK) == -1)

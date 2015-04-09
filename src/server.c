@@ -55,7 +55,8 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_in *in)
 
 	list_for_each_entry (re, chain, list) {
 		if (re->real_addr.sin_family == in->sin_family &&
-			re->real_addr.sin_addr.s_addr == in->sin_addr.s_addr) {
+			re->real_addr.sin_addr.s_addr == in->sin_addr.s_addr &&
+			re->real_addr.sin_port == in->sin_port) {
 			re->refs++;
 			return re;
 		}
@@ -235,7 +236,7 @@ static struct tun_client *tun_client_get_or_create(
 				ce->ra->real_addr.sin_port != raddr->sin_port) {
 				/* Real address changed, get a new entry for that. */
 				ra_put_no_free(ce->ra);
-				if ((ce->ra = ra_get_or_create(raddr)) == 0) {
+				if ((ce->ra = ra_get_or_create(raddr)) == NULL) {
 					tun_client_release(ce);
 					return NULL;
 				}
@@ -273,24 +274,20 @@ static struct tun_client *tun_client_get_or_create(
 
 static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
 {
-	char in_data[32], out_data[32];
-	struct minivtun_msg *in_msg = (struct minivtun_msg *)in_data;
+	char in_data[32], crypt_buffer[32];
+	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
 	void *out_msg;
 	size_t out_len;
 	int rc;
 
-	memset(&in_msg->hdr, 0x0, sizeof(in_msg->hdr));
-	if (g_crypto_passwd) {
-		/* FIXME: Fill correct MD5 sum here. */
-		//
-		//
-		memset(in_msg->hdr.passwd_md5sum, 0x0, sizeof(in_msg->hdr.passwd_md5sum));
-	}
-	in_msg->hdr.opcode = MINIVTUN_MSG_NOOP;
+	nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
+	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
+	memcpy(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+		sizeof(nmsg->hdr.passwd_md5sum));
 
-	out_msg = out_data;
-	out_len = sizeof(in_msg->hdr);
-	local_to_netmsg(in_msg, &out_msg, &out_len);
+	out_msg = crypt_buffer;
+	out_len = sizeof(nmsg->hdr);
+	local_to_netmsg(nmsg, &out_msg, &out_len);
 
 	rc = sendto(sockfd, out_msg, out_len, 0,
 		(struct sockaddr *)&re->real_addr, sizeof(re->real_addr));
@@ -379,27 +376,37 @@ static inline void dest_addr_of_ipdata(
 
 static int network_receiving(int tunfd, int sockfd)
 {
-	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
-	struct minivtun_msg *nmsg = (void *)net_buffer;
-	struct tun_pi *pi = (void *)tun_buffer;
-	size_t ip_dlen, ready_dlen;
+	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
+	struct minivtun_msg *nmsg;
+	struct tun_pi pi;
+	void *out_data;
+	size_t ip_dlen, out_dlen;
 	unsigned short af = 0;
 	struct tun_addr virt_addr;
 	struct tun_client *ce;
 	struct ra_entry *re;
 	struct sockaddr_in real_peer;
 	socklen_t real_peer_alen;
+	struct iovec iov[2];
 	int rc;
 
 	real_peer_alen = sizeof(real_peer);
-	rc = recvfrom(sockfd, net_buffer, NM_PI_BUFFER_SIZE, 0,
+	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
 			(struct sockaddr *)&real_peer, &real_peer_alen);
-	if (rc < 0 || rc < MINIVTUN_MSG_BASIC_HLEN)
+	if (rc <= 0)
 		return 0;
 
-	/* FIXME: Verify password. */
-	//
-	//
+	out_data = crypt_buffer;
+	out_dlen = (size_t)rc;
+	netmsg_to_local(read_buffer, &out_data, &out_dlen);
+	nmsg = out_data;
+
+	if (out_dlen < MINIVTUN_MSG_BASIC_HLEN)
+		return 0;
+ 
+	/* Verify password. */
+	if (memcmp(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum, 16) != 0)
+		return 0;
 
 	switch (nmsg->hdr.opcode) {
 	case MINIVTUN_MSG_NOOP:
@@ -412,11 +419,11 @@ static int network_receiving(int tunfd, int sockfd)
 		if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
 			af = AF_INET;
 			/* No packet is shorter than a 20-byte IPv4 header. */
-			if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
 				return 0;
 		} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
 			af = AF_INET6;
-			if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 40)
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
 				return 0;
 		} else {
 			fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
@@ -424,23 +431,24 @@ static int network_receiving(int tunfd, int sockfd)
 		}
 
 		ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
-		ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
-
 		/* Drop incomplete IP packets. */
-		if (ready_dlen < ip_dlen)
+		if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
 			return 0;
 
 		source_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
 		if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)) == NULL)
 			return 0;
+
 		ce->last_recv = current_ts;
 		ce->ra->last_recv = current_ts;
 
-		pi->flags = 0;
-		pi->proto = nmsg->ipdata.proto;
-		memcpy(pi + 1, nmsg->ipdata.data, ip_dlen);
-
-		rc = write(tunfd, pi, sizeof(struct tun_pi) + ip_dlen);
+		pi.flags = 0;
+		pi.proto = nmsg->ipdata.proto;
+		iov[0].iov_base = &pi;
+		iov[0].iov_len = sizeof(pi);
+		iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
+		iov[1].iov_len = ip_dlen;
+		rc = writev(tunfd, iov, 2);
 		break;
 	}
 
@@ -449,17 +457,18 @@ static int network_receiving(int tunfd, int sockfd)
 
 static int tunnel_receiving(int tunfd, int sockfd)
 {
-	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
-	struct minivtun_msg *nmsg = (void *)net_buffer;
-	struct tun_pi *pi = (void *)tun_buffer;
-	size_t ip_dlen, ready_dlen;
+	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
+	struct tun_pi *pi = (void *)read_buffer;
+	struct minivtun_msg nmsg;
+	void *out_data;
+	size_t ip_dlen, out_dlen;
 	unsigned short af = 0;
 	struct tun_addr virt_addr;
 	struct tun_client *ce;
 	int rc;
 
-	rc = read(tunfd, tun_buffer, NM_PI_BUFFER_SIZE);
-	if (rc < 0)
+	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
+	if (rc < sizeof(struct tun_pi))
 		return 0;
 
 	/* We only accept IPv4 or IPv6 frames. */
@@ -467,8 +476,6 @@ static int tunnel_receiving(int tunfd, int sockfd)
 		return 0;
 
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
-	memcpy(nmsg->ipdata.data, pi + 1, ip_dlen);
-	ready_dlen = ip_dlen;
 
 	if (pi->proto == htons(ETH_P_IP)) {
 		af = AF_INET;
@@ -487,11 +494,21 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	if ((ce = tun_client_try_get(&virt_addr)) == NULL)
 		return 0;
 
-	nmsg->hdr.opcode = MINIVTUN_MSG_IPDATA;
-	nmsg->ipdata.proto = pi->proto;
-	nmsg->ipdata.ip_dlen = htons(ip_dlen);
-	rc = sendto(sockfd, net_buffer, MINIVTUN_MSG_IPDATA_OFFSET + ready_dlen, 0,
-			(struct sockaddr *)&ce->ra->real_addr, sizeof(ce->ra->real_addr));
+	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
+	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
+	memcpy(nmsg.hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+		sizeof(nmsg.hdr.passwd_md5sum));
+	nmsg.ipdata.proto = pi->proto;
+	nmsg.ipdata.ip_dlen = htons(ip_dlen);
+	memcpy(nmsg.ipdata.data, pi + 1, ip_dlen);
+
+	/* Do encryption. */
+	out_data = crypt_buffer;
+	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
+	local_to_netmsg(&nmsg, &out_data, &out_dlen);
+
+	rc = sendto(sockfd, out_data, out_dlen, 0,
+		(struct sockaddr *)&ce->ra->real_addr, sizeof(ce->ra->real_addr));
 	ce->last_xmit = current_ts;
 	ce->ra->last_xmit = current_ts;
 
@@ -505,16 +522,17 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	struct sockaddr_in loc_addr;
 	fd_set rset;
 	time_t last_walk;
-	char s1[20];
+	char s_loc_addr[44];
 
 	if (v4pair_to_sockaddr(loc_addr_pair, ':', &loc_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
 	}
 
+	inet_ntop(loc_addr.sin_family, &loc_addr.sin_addr,
+		s_loc_addr, sizeof(s_loc_addr));
 	printf("Mini virtual tunnelling server on %s:%u, interface: %s.\n",
-			ipv4_htos(ntohl(loc_addr.sin_addr.s_addr), s1), ntohs(loc_addr.sin_port),
-			g_devname);
+		s_loc_addr, ntohs(loc_addr.sin_port), g_devname);
 
 	/* Initialize address map hash table. */
 	init_va_ra_maps();

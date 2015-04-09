@@ -22,26 +22,170 @@
 
 #include "minivtun.h"
 
+static time_t last_recv = 0, last_xmit = 0, current_ts = 0;
+static struct sockaddr_in peer_addr;
+
+static int network_receiving(int tunfd, int sockfd)
+{
+	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
+	struct minivtun_msg *nmsg;
+	struct tun_pi pi;
+	void *out_data;
+	size_t ip_dlen, out_dlen;
+	struct sockaddr_in real_peer;
+	socklen_t real_peer_alen;
+	struct iovec iov[2];
+	int rc;
+
+	real_peer_alen = sizeof(real_peer);
+	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
+			(struct sockaddr *)&real_peer, &real_peer_alen);
+	if (rc <= 0)
+		return 0;
+
+	out_data = crypt_buffer;
+	out_dlen = (size_t)rc;
+	netmsg_to_local(read_buffer, &out_data, &out_dlen);
+	nmsg = out_data;
+
+	if (out_dlen < MINIVTUN_MSG_BASIC_HLEN)
+		return 0;
+ 
+	/* Verify password. */
+	if (memcmp(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum, 16) != 0)
+		return 0;
+
+	last_recv = current_ts;
+
+	switch (nmsg->hdr.opcode) {
+	case MINIVTUN_MSG_NOOP:
+		break;
+	case MINIVTUN_MSG_IPDATA:
+		if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
+			/* No packet is shorter than a 20-byte IPv4 header. */
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+				return 0;
+		} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
+				return 0;
+		} else {
+			fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+			return 0;
+		}
+
+		ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
+		/* Drop incomplete IP packets. */
+		if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
+			return 0;
+
+		pi.flags = 0;
+		pi.proto = nmsg->ipdata.proto;
+		iov[0].iov_base = &pi;
+		iov[0].iov_len = sizeof(pi);
+		iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
+		iov[1].iov_len = ip_dlen;
+		rc = writev(tunfd, iov, 2);
+		break;
+	}
+
+	return 0;
+}
+
+static int tunnel_receiving(int tunfd, int sockfd)
+{
+	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
+	struct tun_pi *pi = (void *)read_buffer;
+	struct minivtun_msg nmsg;
+	void *out_data;
+	size_t ip_dlen, out_dlen;
+	int rc;
+
+	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
+	if (rc < sizeof(struct tun_pi))
+		return 0;
+
+	/* We only accept IPv4 or IPv6 frames. */
+	if (pi->proto != htons(ETH_P_IP) && pi->proto != htons(ETH_P_IPV6))
+		return 0;
+
+	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
+
+	if (pi->proto == htons(ETH_P_IP)) {
+		if (ip_dlen < 20)
+			return 0;
+	} else if (pi->proto == htons(ETH_P_IPV6)) {
+		if (ip_dlen < 40)
+			return 0;
+	} else {
+		fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+		return 0;
+	}
+
+	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
+	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
+	memcpy(nmsg.hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+		sizeof(nmsg.hdr.passwd_md5sum));
+	nmsg.ipdata.proto = pi->proto;
+	nmsg.ipdata.ip_dlen = htons(ip_dlen);
+	memcpy(nmsg.ipdata.data, pi + 1, ip_dlen);
+
+	/* Do encryption. */
+	out_data = crypt_buffer;
+	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
+	local_to_netmsg(&nmsg, &out_data, &out_dlen);
+
+	rc = sendto(sockfd, out_data, out_dlen, 0,
+		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	last_xmit = current_ts;
+
+	return 0;
+}
+
+static int peer_keepalive(int sockfd)
+{
+	char in_data[32], crypt_buffer[32];
+	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
+	void *out_msg;
+	size_t out_len;
+	int rc;
+
+	nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
+	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
+	memcpy(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+		sizeof(nmsg->hdr.passwd_md5sum));
+
+	out_msg = crypt_buffer;
+	out_len = sizeof(nmsg->hdr);
+	local_to_netmsg(nmsg, &out_msg, &out_len);
+
+	rc = sendto(sockfd, out_msg, out_len, 0,
+		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+
+	/* Update 'last_xmit' only when it's really sent out. */
+	if (rc > 0) {
+		last_xmit = current_ts;
+	}
+
+	return rc;
+}
+
+
 int run_client(int tunfd, const char *peer_addr_pair)
 {
-	char tun_buffer[NM_PI_BUFFER_SIZE + 64], net_buffer[NM_PI_BUFFER_SIZE + 64];
-	struct minivtun_msg *nmsg = (void *)net_buffer;
-	struct tun_pi *pi = (void *)tun_buffer;
-	time_t last_recv = 0, last_xmit = 0, current_ts;
 	struct timeval timeo;
-	size_t ip_dlen, ready_dlen;
 	int sockfd, rc;
-	struct sockaddr_in peer_addr;
 	fd_set rset;
-	char s1[20];
+	char s_peer_addr[44];
 
 	if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", peer_addr_pair);
 		return -1;
 	}
 
-	printf("Mini virtual tunnelling client to %s:%u.\n",
-		ipv4_htos(ntohl(peer_addr.sin_addr.s_addr), s1), ntohs(peer_addr.sin_port));
+	inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
+		s_peer_addr, sizeof(s_peer_addr));
+	printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
+		s_peer_addr, ntohs(peer_addr.sin_port), g_devname);
 
 	/* The initial tunnelling connection. */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
@@ -59,7 +203,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		FD_SET(tunfd, &rset);
 		FD_SET(sockfd, &rset);
 
-		timeo.tv_sec = 1;
+		timeo.tv_sec = 2;
 		timeo.tv_usec = 0;
 
 		rc = select((tunfd > sockfd ? tunfd : sockfd) + 1, &rset, NULL, NULL, &timeo);
@@ -77,10 +221,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Packet receive timed out, send keep-alive packet. */
 		if (current_ts - last_xmit > g_keepalive_timeo) {
-			nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
-			sendto(sockfd, nmsg, MINIVTUN_MSG_BASIC_HLEN, 0,
-					(struct sockaddr *)&peer_addr, sizeof(peer_addr));
-			last_xmit = current_ts;
+			peer_keepalive(sockfd);
 		}
 
 		/* Connection timed out, try reconnecting. */
@@ -89,6 +230,9 @@ int run_client(int tunfd, const char *peer_addr_pair)
 				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
 				continue;
 			}
+			last_xmit = 0;
+			last_recv = current_ts;
+			continue;
 		}
 
 		/* No result from select(), do nothing. */
@@ -96,75 +240,11 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			continue;
 
 		if (FD_ISSET(sockfd, &rset)) {
-			struct sockaddr_in real_peer_addr;
-			socklen_t real_peer_alen = sizeof(real_peer_addr);
-
-			rc = recvfrom(sockfd, net_buffer, NM_PI_BUFFER_SIZE, 0,
-					(struct sockaddr *)&real_peer_addr, &real_peer_alen);
-			if (rc < 0 || rc < MINIVTUN_MSG_BASIC_HLEN)
-				goto out1;
-
-			/* FIXME: Verify password. */
-			//
-			//
-
-			last_recv = current_ts;
-
-			switch (nmsg->hdr.opcode) {
-			case MINIVTUN_MSG_IPDATA:
-				/* No packet is shorter than a 20-byte IPv4 header. */
-				if (rc < MINIVTUN_MSG_IPDATA_OFFSET + 20)
-					break;
-				ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
-				pi->flags = 0;
-				pi->proto = nmsg->ipdata.proto;
-				ready_dlen = (size_t)rc - MINIVTUN_MSG_IPDATA_OFFSET;
-				//if (g_crypto_passwd) {
-				//	bytes_decrypt(pi + 1, nmsg->ipdata.data, &ready_dlen);
-				//	/* Drop incomplete IP packets. */
-				//	if (ready_dlen < ip_dlen)
-				//		break;
-				//} else {
-					/* Drop incomplete IP packets. */
-					if (ready_dlen < ip_dlen)
-						break;
-					memcpy(pi + 1, nmsg->ipdata.data, ip_dlen);
-				//}
-				rc = write(tunfd, pi, sizeof(struct tun_pi) + ip_dlen);
-				break;
-			case MINIVTUN_MSG_DISCONNECT:
-				/* NOTICE: To instantly know connection closed in next loop. */
-				last_recv = last_xmit = 0;
-				break;
-			}
-			out1: ;
+			rc = network_receiving(tunfd, sockfd);
 		}
 
 		if (FD_ISSET(tunfd, &rset)) {
-			rc = read(tunfd, tun_buffer, NM_PI_BUFFER_SIZE);
-			if (rc < 0)
-				break;
-
-			switch (ntohs(pi->proto)) {
-			case ETH_P_IP:
-			case ETH_P_IPV6:
-				ip_dlen = (size_t)rc - sizeof(struct tun_pi);
-				nmsg->hdr.opcode = MINIVTUN_MSG_IPDATA;
-				nmsg->ipdata.proto = pi->proto;
-				nmsg->ipdata.ip_dlen = htons(ip_dlen);
-				//if (g_crypto_passwd) {
-				//	ready_dlen = ip_dlen;
-				//	bytes_encrypt(nmsg->ipdata.data, pi + 1, &ready_dlen);
-				//} else {
-					memcpy(nmsg->ipdata.data, pi + 1, ip_dlen);
-					ready_dlen = ip_dlen;
-				//}
-				/* Server sends to peer after it has learned client address. */
-				rc = sendto(sockfd, net_buffer, MINIVTUN_MSG_IPDATA_OFFSET + ready_dlen, 0,
-						(struct sockaddr *)&peer_addr, sizeof(peer_addr));
-				last_xmit = current_ts;
-				break;
-			}
+			rc = tunnel_receiving(tunfd, sockfd);
 		}
 	}
 

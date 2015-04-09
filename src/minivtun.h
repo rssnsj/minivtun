@@ -26,7 +26,7 @@ struct minivtun_msg {
 		struct {
 			__be16 proto;   /* ETH_P_IP or ETH_P_IPV6 */
 			__be16 ip_dlen; /* Total length of IP/IPv6 data */
-			char data[1024 * 8];
+			char data[1024 * 2];
 		} __attribute__((packed)) ipdata;
 	};
 } __attribute__((packed));
@@ -34,7 +34,7 @@ struct minivtun_msg {
 #define MINIVTUN_MSG_BASIC_HLEN (sizeof(((struct minivtun_msg *)0)->hdr))
 #define MINIVTUN_MSG_IPDATA_OFFSET (offsetof(struct minivtun_msg, ipdata.data))
 
-#define NM_PI_BUFFER_SIZE  (2048)
+#define NM_PI_BUFFER_SIZE  (1024 * 3)
 
 extern unsigned g_reconnect_timeo;
 extern unsigned g_keepalive_timeo;
@@ -44,6 +44,7 @@ extern char g_devname[];
 extern AES_KEY g_encrypt_key;
 extern AES_KEY g_decrypt_key;
 extern const char *g_crypto_passwd;
+extern char g_crypto_passwd_md5sum[];
 
 static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
 {
