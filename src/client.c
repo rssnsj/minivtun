@@ -19,8 +19,6 @@
 #include <netinet/ether.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-#include <openssl/aes.h>
-#include <openssl/md5.h>
 
 #include "minivtun.h"
 

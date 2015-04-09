@@ -19,3 +19,9 @@ install: minivtun
 
 clean:
 	rm -f minivtun *.o
+
+up:
+	make clean
+	rsync ../ root@w.rssn.cn:minivtun/ -av --exclude=rsync.sh
+	rsync ../ root@192.168.5.56:minivtun/ -av --exclude=rsync.sh
+	make
