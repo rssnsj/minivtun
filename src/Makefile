@@ -5,7 +5,7 @@
 #
 
 CC ?= gcc
-CFLAGS += -Wall -g
+CFLAGS ?= -Wall
 HEADERS = minivtun.h library.h list.h
 
 minivtun: minivtun.o library.o server.o client.o
