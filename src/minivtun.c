@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2015 Justin Liu
  * Author: Justin Liu <rssnsj@gmail.com>
- * https://github.com/rssnsj/network-feeds
+ * https://github.com/rssnsj/minivtun
  */
 
 #include <stdio.h>
@@ -36,7 +36,7 @@ bool g_in_background = false;
 
 static void print_help(int argc, char *argv[])
 {
-	printf("P2P-based virtual tunneller.\n");
+	printf("Mini virtual tunneller in non-standard protocol.\n");
 	printf("Usage:\n");
 	printf("  %s [options]\n", argv[0]);
 	printf("Options:\n");
@@ -47,11 +47,9 @@ static void print_help(int argc, char *argv[])
 	printf("  -m <mtu>              set MTU size, default: %u.\n", g_tun_mtu);
 	printf("  -t <g_keepalive_timeo>  seconds between sending keep-alive packets, default: %u\n", g_keepalive_timeo);
 	printf("  -n <ifname>           tunnel interface name\n");
-	printf("  -o <log_file>         log file path, only used with '-d'\n");
 	printf("  -p <pid_file>         PID file of the daemon\n");
-	printf("  -e <g_encrypt_key>      shared password for data encryption\n");
+	printf("  -e <g_encrypt_key>    shared password for data encryption\n");
 	printf("  -N                    turn off encryption for tunnelling data\n");
-	printf("  -v                    verbose print (P2P negotiation mode)\n");
 	printf("  -d                    run as daemon process\n");
 	printf("  -h                    print this help\n");
 }
@@ -84,28 +82,6 @@ static int tun_alloc(char *dev)
 	return fd;
 }
 
-
-//static void cleanup_on_exit(int sig)
-//{
-//	if (g_sockfd >= 0 && is_valid_host_sin(&g_peer_addr)) {
-//		struct minivtun_msg nmsg;
-//		int i;
-//
-//		memset(&nmsg, 0x0, sizeof(nmsg));
-//		nmsg.hdr.opcode = MINIVTUN_MSG_DISCONNECT;
-//		for (i = 0; i < 2; i++) {
-//			sendto(g_sockfd, &nmsg, MINIVTUN_MSG_BASIC_HLEN, 0,
-//				(struct sockaddr *)&g_peer_addr, sizeof(g_peer_addr));
-//		}
-//		fprintf(stderr, "Notification sent to peer.\n");
-//	}
-//	if (g_pid_file)
-//		unlink(g_pid_file);
-//	exit(sig);
-//}
-
-/* -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- */
-
 int main(int argc, char *argv[])
 {
 	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
@@ -114,7 +90,7 @@ int main(int argc, char *argv[])
 	char cmd[100];
 	int tunfd, opt;
 
-	while ((opt = getopt(argc, argv, "s:r:l:a:A:m:t:n:o:p:S:e:Nvdh")) != -1) {
+	while ((opt = getopt(argc, argv, "r:l:a:A:m:t:n:p:e:Ndh")) != -1) {
 		switch (opt) {
 		case 'l':
 			loc_addr_pair = optarg;
@@ -160,7 +136,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (strlen(g_devname) == 0)
-		strcpy(g_devname, "p2p%d");
+		strcpy(g_devname, "mv%d");
 	if ((tunfd = tun_alloc(g_devname)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
