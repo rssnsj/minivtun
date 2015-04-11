@@ -1,5 +1,5 @@
 # minivtun
-A fast secure VPN service in non-standard protocol for rapid deploying VPN servers/clients or getting through firewalls
+A fast secure VPN service in non-standard protocol for rapidly deploying VPN servers/clients or getting through firewalls
 
 ### Installation
 
