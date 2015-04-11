@@ -223,14 +223,13 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			return -1;
 		}
 
-		/* Check connection state on each chance. */
 		current_ts = time(NULL);
 		if (last_recv > current_ts)
 			last_recv = current_ts;
 		if (last_xmit > current_ts)
 			last_xmit = current_ts;
 
-		/* Packet receive timed out, send keep-alive packet. */
+		/* Packet transmission timed out, send keep-alive packet. */
 		if (current_ts - last_xmit > g_keepalive_timeo) {
 			peer_keepalive(sockfd);
 		}

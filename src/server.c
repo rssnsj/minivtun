@@ -36,7 +36,7 @@ struct ra_entry {
 	int refs;
 };
 
-#define RA_SET_HASH_SIZE  (1 << 6)
+#define RA_SET_HASH_SIZE  (1 << 3)
 #define RA_SET_LIMIT_EACH_WALK  (10)
 static struct list_head ra_set_hbase[RA_SET_HASH_SIZE];
 static unsigned ra_set_len;
@@ -116,7 +116,7 @@ struct tun_client {
 	time_t last_xmit;
 };
 
-#define VA_MAP_HASH_SIZE  (1 << 8)
+#define VA_MAP_HASH_SIZE  (1 << 4)
 #define VA_MAP_LIMIT_EACH_WALK  (10)
 static struct list_head va_map_hbase[VA_MAP_HASH_SIZE];
 static unsigned va_map_len;
@@ -305,6 +305,7 @@ static void va_ra_walk_continue(int sockfd)
 	static unsigned va_index = 0, ra_index = 0;
 	unsigned va_walk_max = VA_MAP_LIMIT_EACH_WALK, va_count = 0;
 	unsigned ra_walk_max = RA_SET_LIMIT_EACH_WALK, ra_count = 0;
+	unsigned __va_index = va_index, __ra_index = ra_index;
 	struct tun_client *ce, *__ce;
 	struct ra_entry *re, *__re;
 
@@ -314,31 +315,35 @@ static void va_ra_walk_continue(int sockfd)
 		ra_walk_max = ra_set_len;
 
 	/* Recycle virtual address entries. */
-	do {
-		list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
-			//tun_client_dump(ce);
-			if (current_ts - ce->last_recv > g_reconnect_timeo) {
-				tun_client_release(ce);
+	if (va_walk_max > 0) {
+		do {
+			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
+				//tun_client_dump(ce);
+				if (current_ts - ce->last_recv > g_reconnect_timeo) {
+					tun_client_release(ce);
+				}
+				va_count++;
 			}
-			va_count++;
-		}
-		va_index = (va_index + 1) & (VA_MAP_HASH_SIZE - 1);
-	} while (va_count < va_walk_max);
+			va_index = (va_index + 1) & (VA_MAP_HASH_SIZE - 1);
+		} while (va_count < va_walk_max && va_index != __va_index);
+	}
 
 	/* Recycle or keep-alive real client addresses. */
-	do {
-		list_for_each_entry_safe (re, __re, &ra_set_hbase[ra_index], list) {
-			if (current_ts - re->last_recv > g_reconnect_timeo) {
-				if (re->refs == 0) {
-					ra_entry_release(re);
+	if (ra_walk_max > 0) {
+		do {
+			list_for_each_entry_safe (re, __re, &ra_set_hbase[ra_index], list) {
+				if (current_ts - re->last_recv > g_reconnect_timeo) {
+					if (re->refs == 0) {
+						ra_entry_release(re);
+					}
+				} else if (current_ts - re->last_xmit > g_keepalive_timeo) {
+					ra_entry_keepalive(re, sockfd);
 				}
-			} else if (current_ts - re->last_xmit > g_keepalive_timeo) {
-				ra_entry_keepalive(re, sockfd);
+				ra_count++;
 			}
-			ra_count++;
-		}
-		ra_index = (ra_index + 1) & (RA_SET_HASH_SIZE - 1);
-	} while (ra_count < ra_walk_max);
+			ra_index = (ra_index + 1) & (RA_SET_HASH_SIZE - 1);
+		} while (ra_count < ra_walk_max && ra_index != __ra_index);
+	}
 
 	printf("Online clients: %u, addresses: %u\n", ra_set_len, va_map_len);
 }
@@ -577,10 +582,8 @@ int run_server(int tunfd, const char *loc_addr_pair)
 			return -1;
 		}
 
-		/* Check connection state on each chance. */
 		current_ts = time(NULL);
 
-		/* No result from select(), do nothing. */
 		if (rc > 0) {
 			if (FD_ISSET(sockfd, &rset)) {
 				rc = network_receiving(tunfd, sockfd);
@@ -591,6 +594,7 @@ int run_server(int tunfd, const char *loc_addr_pair)
 			}
 		}
 
+		/* Check connection state at each chance. */
 		if (current_ts - last_walk >= 3) {
 			va_ra_walk_continue(sockfd);
 			last_walk = current_ts;
