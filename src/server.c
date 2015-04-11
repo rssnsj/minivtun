@@ -193,17 +193,17 @@ static inline void tun_client_release(struct tun_client *ce)
 {
 	char s_virt_addr[44], s_real_addr[44];
 
-	ra_put_no_free(ce->ra);
-
-	list_del(&ce->list);
-	va_map_len--;
-
 	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in,
 		s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sin_family, &ce->ra->real_addr.sin_addr,
 		s_real_addr, sizeof(s_real_addr));
 	printf("Recycled virtual address [%s] at [%s:%u].\n", s_virt_addr, s_real_addr,
 		ntohs(ce->ra->real_addr.sin_port));
+
+	ra_put_no_free(ce->ra);
+
+	list_del(&ce->list);
+	va_map_len--;
 
 	free(ce);
 }
@@ -226,10 +226,10 @@ static struct tun_client *tun_client_get_or_create(
 {
 	struct list_head *chain = &va_map_hbase[
 		tun_addr_hash(vaddr) & (VA_MAP_HASH_SIZE - 1)];
-	struct tun_client *ce;
+	struct tun_client *ce, *__ce;
 	char s_virt_addr[44], s_real_addr[44];
 
-	list_for_each_entry (ce, chain, list) {
+	list_for_each_entry_safe (ce, __ce, chain, list) {
 		if (tun_addr_comp(&ce->virt_addr, vaddr) == 0) {
 			if (ce->ra->real_addr.sin_family != raddr->sin_family ||
 				ce->ra->real_addr.sin_addr.s_addr != raddr->sin_addr.s_addr ||
