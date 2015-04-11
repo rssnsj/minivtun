@@ -41,4 +41,9 @@ Client: Connect VPN to the above server (assuming address vpn.abc.com), with loc
 
     /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.33/24 -e Hello -d
 
+Multiple clients on different devices can be connected to the same server:
 
+    /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.34/24 -e Hello -d
+    /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.35/24 -e Hello -d
+    /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.36/24 -e Hello -d
+    ...
