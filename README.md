@@ -33,7 +33,12 @@ A fast secure VPN service in non-standard protocol for rapid deploying VPN serve
 
 ### Examples
 
-  Run a VPN server on port 1414, with local virtual address 10.7.0.1, client address space 10.7.0.0/24, encryption password 'Hello':
+Server: Run a VPN server on port 1414, with local virtual address 10.7.0.1, client address space 10.7.0.0/24, encryption password 'Hello':
 
-    /usr/sbin/minivtun -l 0.0.0.0:1414 -a 10.7.0.1/24 -e WscLKm87N -d
-    
+    /usr/sbin/minivtun -l 0.0.0.0:1414 -a 10.7.0.1/24 -e Hello -d
+
+Client: Connect VPN to the above server (assuming address vpn.abc.com), with local virtual address 10.7.0.33:
+
+    /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.33/24 -e Hello -d
+
+
