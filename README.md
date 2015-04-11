@@ -23,10 +23,10 @@ A fast secure VPN service in non-standard protocol for rapidly deploying VPN ser
       -a <tun_lip/tun_rip>  tunnel IP pair
       -A <tun_ip6/pfx_len>  tunnel IPv6 address/prefix length pair
       -m <mtu>              set MTU size, default: 1408.
-      -t <g_keepalive_timeo>  seconds between sending keep-alive packets, default: 13
+      -t <keepalive_timeo>  seconds between sending keep-alive packets, default: 13
       -n <ifname>           tunnel interface name
       -p <pid_file>         PID file of the daemon
-      -e <g_encrypt_key>    shared password for data encryption
+      -e <encrypt_key>      shared password for data encryption
       -N                    turn off encryption for tunnelling data
       -d                    run as daemon process
       -h                    print this help
