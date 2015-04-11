@@ -45,10 +45,10 @@ static void print_help(int argc, char *argv[])
 	printf("  -a <tun_lip/tun_rip>  tunnel IP pair\n");
 	printf("  -A <tun_ip6/pfx_len>  tunnel IPv6 address/prefix length pair\n");
 	printf("  -m <mtu>              set MTU size, default: %u.\n", g_tun_mtu);
-	printf("  -t <g_keepalive_timeo>  seconds between sending keep-alive packets, default: %u\n", g_keepalive_timeo);
+	printf("  -t <keepalive_timeo>  seconds between sending keep-alive packets, default: %u\n", g_keepalive_timeo);
 	printf("  -n <ifname>           tunnel interface name\n");
 	printf("  -p <pid_file>         PID file of the daemon\n");
-	printf("  -e <g_encrypt_key>    shared password for data encryption\n");
+	printf("  -e <encrypt_key>      shared password for data encryption\n");
 	printf("  -N                    turn off encryption for tunnelling data\n");
 	printf("  -d                    run as daemon process\n");
 	printf("  -h                    print this help\n");
