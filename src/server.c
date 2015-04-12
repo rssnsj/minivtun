@@ -92,6 +92,7 @@ static inline void ra_entry_release(struct ra_entry *re)
 
 	assert(re->refs == 0);
 	list_del(&re->list);
+	ra_set_len--;
 
 	inet_ntop(re->real_addr.sin_family, &re->real_addr.sin_addr,
 		s_real_addr, sizeof(s_real_addr));
