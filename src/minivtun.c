@@ -29,6 +29,8 @@ const char *g_crypto_passwd = "";
 char g_crypto_passwd_md5sum[16];
 AES_KEY g_encrypt_key;
 AES_KEY g_decrypt_key;
+struct in_addr g_local_tun_in;
+struct in6_addr g_local_tun_in6;
 
 char g_devname[20];
 static unsigned g_tun_mtu = 1408;
@@ -145,11 +147,11 @@ int main(int argc, char *argv[])
 	/* Configure IPv4 address for the interface. */
 	if (tun_ip_set) {
 		char s_lip[20], s_rip[20], *sp;
-		struct in_addr raddr;
+		struct in_addr vaddr;
 		int na = 0;
 
 		if (!(sp = strchr(tun_ip_set, '/'))) {
-			fprintf(stderr, "*** Invalid P-t-P IP pair: %s.\n", tun_ip_set);
+			fprintf(stderr, "*** Invalid IPv4 address pair: %s.\n", tun_ip_set);
 			exit(1);
 		}
 		strncpy(s_lip, tun_ip_set, sp - tun_ip_set);
@@ -158,11 +160,12 @@ int main(int argc, char *argv[])
 		strncpy(s_rip, sp, sizeof(s_rip));
 		s_rip[sizeof(s_rip) - 1] = '\0';
 
-		if (!inet_pton(AF_INET, s_lip, &raddr)) {
+		if (!inet_pton(AF_INET, s_lip, &vaddr)) {
 			fprintf(stderr, "*** Invalid local IPv4 address: %s.\n", s_lip);
 			exit(1);
 		}
-		if (inet_pton(AF_INET, s_rip, &raddr)) {
+		g_local_tun_in = vaddr;
+		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
 		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
 			uint32_t mask = ~((1 << (32 - na)) - 1);
@@ -179,7 +182,31 @@ int main(int argc, char *argv[])
 
 	/* Configure IPv6 address if set. */
 	if (tun_ip6_set) {
-		sprintf(cmd, "ifconfig %s add %s", g_devname, tun_ip6_set);
+		char s_lip[50], s_pfx[20], *sp;
+		struct in6_addr vaddr;
+		int pfx_len = 0;
+
+		if (!(sp = strchr(tun_ip6_set, '/'))) {
+			fprintf(stderr, "*** Invalid IPv6 address pair: %s.\n", tun_ip6_set);
+			exit(1);
+		}
+		strncpy(s_lip, tun_ip6_set, sp - tun_ip6_set);
+		s_lip[sp - tun_ip6_set] = '\0';
+		sp++;
+		strncpy(s_pfx, sp, sizeof(s_pfx));
+		s_pfx[sizeof(s_pfx) - 1] = '\0';
+
+		if (!inet_pton(AF_INET6, s_lip, &vaddr)) {
+			fprintf(stderr, "*** Invalid local IPv6 address: %s.\n", s_lip);
+			exit(1);
+		}
+		g_local_tun_in6 = vaddr;
+		if (!(sscanf(s_pfx, "%d", &pfx_len) == 1 && pfx_len > 0 && pfx_len <= 128)) {
+			fprintf(stderr, "*** Not a legal prefix length: %s.\n", s_pfx);
+			exit(1);
+		}
+
+		sprintf(cmd, "ifconfig %s add %s/%d", g_devname, s_lip, pfx_len);
 		(void)system(cmd);
 	}
 

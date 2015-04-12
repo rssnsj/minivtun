@@ -10,7 +10,7 @@
 #include "library.h"
 
 enum {
-	MINIVTUN_MSG_NOOP,
+	MINIVTUN_MSG_KEEPALIVE,
 	MINIVTUN_MSG_IPDATA,
 	MINIVTUN_MSG_DISCONNECT,
 };
@@ -28,6 +28,10 @@ struct minivtun_msg {
 			__be16 ip_dlen; /* Total length of IP/IPv6 data */
 			char data[1024 * 2];
 		} __attribute__((packed)) ipdata;
+		struct {
+			struct in_addr loc_tun_in;
+			struct in6_addr loc_tun_in6;
+		} __attribute__((packed)) keepalive;
 	};
 } __attribute__((packed));
 
@@ -46,6 +50,8 @@ extern AES_KEY g_encrypt_key;
 extern AES_KEY g_decrypt_key;
 extern const char *g_crypto_passwd;
 extern char g_crypto_passwd_md5sum[];
+extern struct in_addr g_local_tun_in;
+extern struct in6_addr g_local_tun_in6;
 
 static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
 {

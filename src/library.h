@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <openssl/aes.h>
 #include <openssl/md5.h>
 
@@ -78,6 +79,20 @@ static inline void bytes_decrypt(AES_KEY *key, const void *in, void *out, size_t
 }
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+
+static inline bool is_valid_unicast_in(struct in_addr *in)
+{
+	uint32_t a = ntohl(in->s_addr);
+	return  ((a & 0xff000000) != 0x00000000) &&
+			((a & 0xf0000000) != 0xe0000000);
+}
+
+static inline bool is_valid_unicast_in6(struct in6_addr *in6)
+{
+	uint32_t a0 = ntohl(in6->s6_addr32[0]);
+	return  ((a0 & 0xff000000) != 0x00000000) &&
+			((a0 & 0xff000000) != 0xff000000);
+}
 
 int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr);
 

@@ -274,19 +274,21 @@ static struct tun_client *tun_client_get_or_create(
 
 static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
 {
-	char in_data[32], crypt_buffer[32];
+	char in_data[64], crypt_buffer[64];
 	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
 	void *out_msg;
 	size_t out_len;
 	int rc;
 
-	nmsg->hdr.opcode = MINIVTUN_MSG_NOOP;
+	nmsg->hdr.opcode = MINIVTUN_MSG_KEEPALIVE;
 	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
 	memcpy(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum,
 		sizeof(nmsg->hdr.passwd_md5sum));
+	nmsg->keepalive.loc_tun_in = g_local_tun_in;
+	nmsg->keepalive.loc_tun_in6 = g_local_tun_in6;
 
 	out_msg = crypt_buffer;
-	out_len = sizeof(nmsg->hdr);
+	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
 	rc = sendto(sockfd, out_msg, out_len, 0,
@@ -416,10 +418,24 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
 
 	switch (nmsg->hdr.opcode) {
-	case MINIVTUN_MSG_NOOP:
+	case MINIVTUN_MSG_KEEPALIVE:
 		if ((re = ra_get_or_create(&real_peer))) {
 			re->last_recv = current_ts;
 			ra_put_no_free(re);
+		}
+		if (out_dlen < MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive))
+			return 0;
+		if (is_valid_unicast_in(&nmsg->keepalive.loc_tun_in)) {
+			virt_addr.af = AF_INET;
+			virt_addr.in = nmsg->keepalive.loc_tun_in;
+			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
+				ce->last_recv = current_ts;
+		}
+		if (is_valid_unicast_in6(&nmsg->keepalive.loc_tun_in6)) {
+			virt_addr.af = AF_INET6;
+			virt_addr.in6 = nmsg->keepalive.loc_tun_in6;
+			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
+				ce->last_recv = current_ts;
 		}
 		break;
 	case MINIVTUN_MSG_IPDATA:
