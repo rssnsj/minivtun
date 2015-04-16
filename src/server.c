@@ -25,6 +25,7 @@
 #include "jhash.h"
 #include "minivtun.h"
 
+/* Timestamp for each loop. */
 static time_t current_ts = 0;
 static uint32_t hash_initval = 0;
 
@@ -36,6 +37,7 @@ struct ra_entry {
 	int refs;
 };
 
+/* Hash table for dedicated clients (real addresses). */
 #define RA_SET_HASH_SIZE  (1 << 3)
 #define RA_SET_LIMIT_EACH_WALK  (10)
 static struct list_head ra_set_hbase[RA_SET_HASH_SIZE];
@@ -111,12 +113,12 @@ struct tun_addr {
 struct tun_client {
 	struct list_head list;
 	struct tun_addr virt_addr;
-	//struct sockaddr_in real_addr;
 	struct ra_entry *ra;
 	time_t last_recv;
 	time_t last_xmit;
 };
 
+/* Hash table of virtual address in tunnel. */
 #define VA_MAP_HASH_SIZE  (1 << 4)
 #define VA_MAP_LIMIT_EACH_WALK  (10)
 static struct list_head va_map_hbase[VA_MAP_HASH_SIZE];
@@ -273,6 +275,10 @@ static struct tun_client *tun_client_get_or_create(
 	return ce;
 }
 
+/**
+ * Send keep-alive packet to the corresponding client
+ * with information stored in 're'.
+ */
 static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
 {
 	char in_data[64], crypt_buffer[64];
@@ -317,7 +323,7 @@ static void va_ra_walk_continue(int sockfd)
 	if (ra_walk_max > ra_set_len)
 		ra_walk_max = ra_set_len;
 
-	/* Recycle virtual address entries. */
+	/* Recycle timeout virtual address entries. */
 	if (va_walk_max > 0) {
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
