@@ -51,6 +51,8 @@ static void print_help(int argc, char *argv[])
 	printf("  -n <ifname>           tunnel interface name\n");
 	printf("  -p <pid_file>         PID file of the daemon\n");
 	printf("  -e <encrypt_key>      shared password for data encryption\n");
+	printf("  -v <network/prefix=gateway>\n");
+	printf("                        route a network to a client address, can be multiple\n");
 	printf("  -N                    turn off encryption for tunnelling data\n");
 	printf("  -d                    run as daemon process\n");
 	printf("  -h                    print this help\n");
@@ -84,6 +86,37 @@ static int tun_alloc(char *dev)
 	return fd;
 }
 
+static void parse_virtual_route(const char *arg)
+{
+	char expr[80], *net, *pfx, *gw;
+	struct in_addr network, gateway;
+	unsigned prefix = 0;
+
+	strncpy(expr, arg, sizeof(expr));
+	expr[sizeof(expr) - 1] = '\0';
+
+	/* 192.168.0.0/16=10.7.0.1 */
+	net = expr;
+	if ((pfx = strchr(net, '/')) == NULL) {
+		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+		exit(1);
+	}
+	*(pfx++) = '\0';
+	if ((gw = strchr(pfx, '=')) == NULL) {
+		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+		exit(1);
+	}
+	*(gw++) = '\0';
+
+	if (!inet_pton(AF_INET, net, &network) ||
+		!inet_pton(AF_INET, gw, &gateway) || sscanf(pfx, "%u", &prefix) != 1) {
+		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+		exit(1);
+	}
+
+	vt_route_add(&network, prefix, &gateway);
+}
+
 int main(int argc, char *argv[])
 {
 	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
@@ -92,7 +125,7 @@ int main(int argc, char *argv[])
 	char cmd[100];
 	int tunfd, opt;
 
-	while ((opt = getopt(argc, argv, "r:l:a:A:m:t:n:p:e:Ndh")) != -1) {
+	while ((opt = getopt(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndh")) != -1) {
 		switch (opt) {
 		case 'l':
 			loc_addr_pair = optarg;
@@ -121,6 +154,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			g_crypto_passwd = optarg;
+			break;
+		case 'v':
+			parse_virtual_route(optarg);
 			break;
 		case 'N':
 			g_crypto_passwd = NULL;

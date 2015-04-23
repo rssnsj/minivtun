@@ -72,6 +72,7 @@ static inline void netmsg_to_local(const void *in, void **out, size_t *dlen)
 
 int run_client(int tunfd, const char *peer_addr_pair);
 int run_server(int tunfd, const char *loc_addr_pair);
+int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway);
 
 #endif /* __MINIVTUN_H */
 
