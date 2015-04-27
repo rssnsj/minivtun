@@ -202,7 +202,9 @@ int main(int argc, char *argv[])
 		}
 		g_local_tun_in = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
+			struct in_addr __network = { .s_addr = 0 };
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
+			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
 			uint32_t mask = ~((1 << (32 - na)) - 1);
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
