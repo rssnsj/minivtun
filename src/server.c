@@ -45,7 +45,13 @@ static unsigned vt_routes_len = 0;
 int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway)
 {
 	struct vt_route *rt;
-	uint32_t mask = ~(((1U << (32 - prefix))) - 1) & 0xffffffff;
+	uint32_t mask;
+
+	if (prefix == 0) {
+		mask = 0;
+	} else {
+		mask = ~((1U << (32 - prefix)) - 1) & 0xffffffff;
+	}
 
 	if (vt_routes_len >= VIRTUAL_ROUTE_MAX) {
 		fprintf(stderr, "*** Virtual route table is full.\n");
