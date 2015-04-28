@@ -32,8 +32,8 @@ AES_KEY g_decrypt_key;
 struct in_addr g_local_tun_in;
 struct in6_addr g_local_tun_in6;
 
-char g_devname[20];
-static unsigned g_tun_mtu = 1408;
+char g_devname[40];
+static unsigned g_tun_mtu = 1416;
 bool g_in_background = false;
 
 static void print_help(int argc, char *argv[])
