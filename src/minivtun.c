@@ -62,11 +62,12 @@ static void print_help(int argc, char *argv[])
 	printf("Options:\n");
 	printf("  -l, --local <ip:port>               IP:port for server to listen\n");
 	printf("  -r, --remote <ip:port>              IP:port of server to connect\n");
-	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   tunnel IP pair\n");
-	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   tunnel IPv6 address/prefix length pair\n");
+	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
+	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
+	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
 	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", g_tun_mtu);
 	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", g_keepalive_timeo);
-	printf("  -n, --ifname <ifname>               tunnel interface name\n");
+	printf("  -n, --ifname <ifname>               virtual interface name\n");
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
 	printf("  -e, --encryption-key <encrypt_key>  shared password for data encryption\n");
 	printf("  -v, --route <network/prefix=gateway>\n");
