@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <errno.h>
 #include <time.h>
 #include <signal.h>
@@ -36,26 +37,43 @@ char g_devname[40];
 static unsigned g_tun_mtu = 1416;
 bool g_in_background = false;
 
+static struct option long_opts[] = {
+	{ "local", required_argument, 0, 'l', },
+	{ "remote", required_argument, 0, 'r', },
+	{ "ipv4-addr", required_argument, 0, 'a', },
+	{ "ipv6-addr", required_argument, 0, 'A', },
+	{ "mtu", required_argument, 0, 'm', },
+	{ "keepalive", required_argument, 0, 't', },
+	{ "ifname", required_argument, 0, 'n', },
+	{ "pidfile", required_argument, 0, 'p', },
+	{ "encryption-key", required_argument, 0, 'e', },
+	{ "no-encryption", no_argument, 0, 'N', },
+	{ "route", required_argument, 0, 'v', },
+	{ "daemon", no_argument, 0, 'd', },
+	{ "help", no_argument, 0, 'h', },
+	{0, 0, 0, 0},
+};
+
 static void print_help(int argc, char *argv[])
 {
 	printf("Mini virtual tunneller in non-standard protocol.\n");
 	printf("Usage:\n");
 	printf("  %s [options]\n", argv[0]);
 	printf("Options:\n");
-	printf("  -l <ip:port>          IP:port of local binding\n");
-	printf("  -r <ip:port>          IP:port of peer device\n");
-	printf("  -a <tun_lip/tun_rip>  tunnel IP pair\n");
-	printf("  -A <tun_ip6/pfx_len>  tunnel IPv6 address/prefix length pair\n");
-	printf("  -m <mtu>              set MTU size, default: %u.\n", g_tun_mtu);
-	printf("  -t <keepalive_timeo>  seconds between sending keep-alive packets, default: %u\n", g_keepalive_timeo);
-	printf("  -n <ifname>           tunnel interface name\n");
-	printf("  -p <pid_file>         PID file of the daemon\n");
-	printf("  -e <encrypt_key>      shared password for data encryption\n");
-	printf("  -v <network/prefix=gateway>\n");
-	printf("                        route a network to a client address, can be multiple\n");
-	printf("  -N                    turn off encryption for tunnelling data\n");
-	printf("  -d                    run as daemon process\n");
-	printf("  -h                    print this help\n");
+	printf("  -l, --local <ip:port>               IP:port for server to listen\n");
+	printf("  -r, --remote <ip:port>              IP:port of server to connect\n");
+	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   tunnel IP pair\n");
+	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   tunnel IPv6 address/prefix length pair\n");
+	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", g_tun_mtu);
+	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", g_keepalive_timeo);
+	printf("  -n, --ifname <ifname>               tunnel interface name\n");
+	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
+	printf("  -e, --encryption-key <encrypt_key>  shared password for data encryption\n");
+	printf("  -v, --route <network/prefix=gateway>\n");
+	printf("                                      route a network to a client address, can be multiple\n");
+	printf("  -N                                  turn off encryption for tunnelling data\n");
+	printf("  -d                                  run as daemon process\n");
+	printf("  -h                                  print this help\n");
 }
 
 static int tun_alloc(char *dev)
@@ -119,13 +137,15 @@ static void parse_virtual_route(const char *arg)
 
 int main(int argc, char *argv[])
 {
-	const char *tun_ip_set = NULL, *tun_ip6_set = NULL;
+	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
 	const char *loc_addr_pair = NULL;
 	const char *peer_addr_pair = NULL;
 	char cmd[100];
 	int tunfd, opt;
 
-	while ((opt = getopt(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndh")) != -1) {
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndh",
+			long_opts, NULL)) != -1) {
+
 		switch (opt) {
 		case 'l':
 			loc_addr_pair = optarg;
@@ -134,10 +154,10 @@ int main(int argc, char *argv[])
 			peer_addr_pair = optarg;
 			break;
 		case 'a':
-			tun_ip_set = optarg;
+			tun_ip_config = optarg;
 			break;
 		case 'A':
-			tun_ip6_set = optarg;
+			tun_ip6_config = optarg;
 			break;
 		case 'm':
 			g_tun_mtu = (unsigned)strtoul(optarg, NULL, 10);
@@ -181,17 +201,17 @@ int main(int argc, char *argv[])
 	}
 
 	/* Configure IPv4 address for the interface. */
-	if (tun_ip_set) {
+	if (tun_ip_config) {
 		char s_lip[20], s_rip[20], *sp;
 		struct in_addr vaddr;
 		int na = 0;
 
-		if (!(sp = strchr(tun_ip_set, '/'))) {
-			fprintf(stderr, "*** Invalid IPv4 address pair: %s.\n", tun_ip_set);
+		if (!(sp = strchr(tun_ip_config, '/'))) {
+			fprintf(stderr, "*** Invalid IPv4 address pair: %s.\n", tun_ip_config);
 			exit(1);
 		}
-		strncpy(s_lip, tun_ip_set, sp - tun_ip_set);
-		s_lip[sp - tun_ip_set] = '\0';
+		strncpy(s_lip, tun_ip_config, sp - tun_ip_config);
+		s_lip[sp - tun_ip_config] = '\0';
 		sp++;
 		strncpy(s_rip, sp, sizeof(s_rip));
 		s_rip[sizeof(s_rip) - 1] = '\0';
@@ -219,17 +239,17 @@ int main(int argc, char *argv[])
 	}
 
 	/* Configure IPv6 address if set. */
-	if (tun_ip6_set) {
+	if (tun_ip6_config) {
 		char s_lip[50], s_pfx[20], *sp;
 		struct in6_addr vaddr;
 		int pfx_len = 0;
 
-		if (!(sp = strchr(tun_ip6_set, '/'))) {
-			fprintf(stderr, "*** Invalid IPv6 address pair: %s.\n", tun_ip6_set);
+		if (!(sp = strchr(tun_ip6_config, '/'))) {
+			fprintf(stderr, "*** Invalid IPv6 address pair: %s.\n", tun_ip6_config);
 			exit(1);
 		}
-		strncpy(s_lip, tun_ip6_set, sp - tun_ip6_set);
-		s_lip[sp - tun_ip6_set] = '\0';
+		strncpy(s_lip, tun_ip6_config, sp - tun_ip6_config);
+		s_lip[sp - tun_ip6_config] = '\0';
 		sp++;
 		strncpy(s_pfx, sp, sizeof(s_pfx));
 		s_pfx[sizeof(s_pfx) - 1] = '\0';
