@@ -22,7 +22,7 @@
 
 #include "minivtun.h"
 
-static time_t last_recv = 0, last_xmit = 0, current_ts = 0;
+static time_t last_recv = 0, last_keepalive = 0, current_ts = 0;
 static struct sockaddr_in peer_addr;
 
 static int network_receiving(int tunfd, int sockfd)
@@ -136,7 +136,12 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	rc = sendto(sockfd, out_data, out_dlen, 0,
 		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
-	last_xmit = current_ts;
+	/**
+	 * NOTICE: Don't update this on each tunnel packet
+	 * transmit. We always need to keep the local virtual IP
+	 * (-a local/...) alive.
+	 */
+	/* last_keepalive = current_ts; */
 
 	return 0;
 }
@@ -163,9 +168,9 @@ static int peer_keepalive(int sockfd)
 	rc = sendto(sockfd, out_msg, out_len, 0,
 		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
 
-	/* Update 'last_xmit' only when it's really sent out. */
+	/* Update 'last_keepalive' only when it's really sent out. */
 	if (rc > 0) {
-		last_xmit = current_ts;
+		last_keepalive = current_ts;
 	}
 
 	return rc;
@@ -208,7 +213,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	}
 
 	/* For triggering the first keep-alive packet to be sent. */
-	last_xmit = 0;
+	last_keepalive = 0;
 	last_recv = time(NULL);
 
 	for (;;) {
@@ -228,11 +233,11 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		current_ts = time(NULL);
 		if (last_recv > current_ts)
 			last_recv = current_ts;
-		if (last_xmit > current_ts)
-			last_xmit = current_ts;
+		if (last_keepalive > current_ts)
+			last_keepalive = current_ts;
 
 		/* Packet transmission timed out, send keep-alive packet. */
-		if (current_ts - last_xmit > g_keepalive_timeo) {
+		if (current_ts - last_keepalive > g_keepalive_timeo) {
 			peer_keepalive(sockfd);
 		}
 
@@ -242,7 +247,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
 				continue;
 			}
-			last_xmit = 0;
+			last_keepalive = 0;
 			last_recv = current_ts;
 			continue;
 		}
