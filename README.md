@@ -54,3 +54,9 @@ Multiple clients on different devices can be connected to the same server:
     /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.35/24 -e Hello -d
     /usr/sbin/minivtun -r vpn.abc.com:1414 -a 10.7.0.36/24 -e Hello -d
     ...
+
+### Diagnoses
+
+If you run 'minivtun' server on a VPS (openvz, kvm, docker, ...), I recommend you to enlarge the server side MTU, e.g., 4000. This is because the physical host might enables segmentation offloadings which let your VPS receive large TCP packets (up to 3000 bytes). Since the feature is opened on the physical host, you cannot disable it. So the best way is to change your MTU by `-m 4000`.
+
+    /usr/sbin/minivtun -l 0.0.0.0:1414 -a 10.7.0.1/24 -e Hello -d -m 4000
