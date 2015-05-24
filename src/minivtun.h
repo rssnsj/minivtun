@@ -38,7 +38,7 @@ struct minivtun_msg {
 #define MINIVTUN_MSG_BASIC_HLEN (sizeof(((struct minivtun_msg *)0)->hdr))
 #define MINIVTUN_MSG_IPDATA_OFFSET (offsetof(struct minivtun_msg, ipdata.data))
 
-#define NM_PI_BUFFER_SIZE  (1024 * 3)
+#define NM_PI_BUFFER_SIZE  (1024 * 8)
 
 extern unsigned g_reconnect_timeo;
 extern unsigned g_keepalive_timeo;
