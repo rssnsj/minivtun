@@ -13,8 +13,8 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netdb.h>
+
+#include "library.h"
 
 int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
 {

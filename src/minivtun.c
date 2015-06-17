@@ -51,7 +51,7 @@ static struct option long_opts[] = {
 	{ "route", required_argument, 0, 'v', },
 	{ "daemon", no_argument, 0, 'd', },
 	{ "help", no_argument, 0, 'h', },
-	{0, 0, 0, 0},
+	{ 0, 0, 0, 0, },
 };
 
 static void print_help(int argc, char *argv[])
@@ -72,9 +72,9 @@ static void print_help(int argc, char *argv[])
 	printf("  -e, --encryption-key <encrypt_key>  shared password for data encryption\n");
 	printf("  -v, --route <network/prefix=gateway>\n");
 	printf("                                      route a network to a client address, can be multiple\n");
-	printf("  -N                                  turn off encryption for tunnelling data\n");
-	printf("  -d                                  run as daemon process\n");
-	printf("  -h                                  print this help\n");
+	printf("  -N, --no-encryption                 turn off encryption for tunnelling data\n");
+	printf("  -d, --daemon                        run as daemon process\n");
+	printf("  -h, --help                          print this help\n");
 }
 
 static int tun_alloc(char *dev)
