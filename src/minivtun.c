@@ -26,10 +26,11 @@
 struct minivtun_config config = {
 	.reconnect_timeo = 13,
 	.keepalive_timeo = 60,
-	.pid_file = NULL,
 	.devname = "",
-	.in_background = false,
+	.tun_mtu = 1416,
 	.crypto_passwd = "",
+	.pid_file = NULL,
+	.in_background = false,
 };
 
 static struct option long_opts[] = {

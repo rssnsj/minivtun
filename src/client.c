@@ -183,7 +183,10 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	fd_set rset;
 	char s_peer_addr[44];
 
-	if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
+	if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) == 0) {
+		/* DNS resolve OK, start service normally. */
+		last_recv = time(NULL);
+	} else {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", peer_addr_pair);
 		return -1;
 	}
@@ -214,7 +217,6 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 	/* For triggering the first keep-alive packet to be sent. */
 	last_keepalive = 0;
-	last_recv = time(NULL);
 
 	for (;;) {
 		FD_ZERO(&rset);
