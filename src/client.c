@@ -183,18 +183,27 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	fd_set rset;
 	char s_peer_addr[44];
 
-	if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) == 0) {
+	if ((rc = v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
+		inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
+			s_peer_addr, sizeof(s_peer_addr));
+		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
+			s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
+	} else if (rc == -EAGAIN && config.wait_dns) {
+		/* Resolve later (last_recv = 0). */
+		last_recv = 0;
+		printf("Mini virtual tunnelling client, interface: %s. \n", config.devname);
+		printf("WARNING: DNS resolution of '%s' temporarily unavailable, "
+			"resolving later.\n", peer_addr_pair);
+	} else if (rc == -EINVAL) {
+		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
+		return -1;
 	} else {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", peer_addr_pair);
 		return -1;
 	}
 
-	inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
-		s_peer_addr, sizeof(s_peer_addr));
-	printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
-		s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
 
 	/* The initial tunnelling connection. */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
@@ -246,11 +255,19 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
 			if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
-				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
+				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
+					peer_addr_pair);
+				sleep(5);
 				continue;
 			}
+
+			/* Reconnected OK. */
 			last_keepalive = 0;
 			last_recv = current_ts;
+
+			inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
+				s_peer_addr, sizeof(s_peer_addr));
+			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(peer_addr.sin_port));
 			continue;
 		}
 

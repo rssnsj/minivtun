@@ -14,14 +14,15 @@ extern struct minivtun_config config;
 struct minivtun_config {
 	unsigned reconnect_timeo;
 	unsigned keepalive_timeo;
-	const char *pid_file;
 	char devname[40];
 	unsigned tun_mtu;
+	const char *crypto_passwd;
+	const char *pid_file;
 	bool in_background;
+	bool wait_dns;
 
 	AES_KEY encrypt_key;
 	AES_KEY decrypt_key;
-	const char *crypto_passwd;
 	char crypto_passwd_md5sum[16];
 	struct in_addr local_tun_in;
 	struct in6_addr local_tun_in6;

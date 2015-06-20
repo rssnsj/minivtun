@@ -31,6 +31,7 @@ struct minivtun_config config = {
 	.crypto_passwd = "",
 	.pid_file = NULL,
 	.in_background = false,
+	.wait_dns = false,
 };
 
 static struct option long_opts[] = {
@@ -43,9 +44,10 @@ static struct option long_opts[] = {
 	{ "ifname", required_argument, 0, 'n', },
 	{ "pidfile", required_argument, 0, 'p', },
 	{ "encryption-key", required_argument, 0, 'e', },
-	{ "no-encryption", no_argument, 0, 'N', },
 	{ "route", required_argument, 0, 'v', },
+	{ "no-encryption", no_argument, 0, 'N', },
 	{ "daemon", no_argument, 0, 'd', },
+	{ "wait-dns", no_argument, 0, 'w', },
 	{ "help", no_argument, 0, 'h', },
 	{ 0, 0, 0, 0, },
 };
@@ -141,7 +143,7 @@ int main(int argc, char *argv[])
 	char cmd[100];
 	int tunfd, opt;
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndwh",
 			long_opts, NULL)) != -1) {
 
 		switch (opt) {
@@ -181,6 +183,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			config.in_background = true;
+			break;
+		case 'w':
+			config.wait_dns = true;
 			break;
 		case 'h':
 			print_help(argc, argv);

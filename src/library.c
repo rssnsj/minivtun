@@ -46,7 +46,7 @@ int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
 	hints.ai_addr = NULL;
 	hints.ai_next = NULL;
 	if ((rc = getaddrinfo(host, portp, &hints, &result)))
-		return -EINVAL;
+		return -EAGAIN;
 
 	/* Get the first resolution. */
 	*addr = *(struct sockaddr_in *)result->ai_addr;
