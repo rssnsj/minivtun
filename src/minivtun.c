@@ -23,19 +23,14 @@
 
 #include "minivtun.h"
 
-unsigned g_keepalive_timeo = 13;
-unsigned g_reconnect_timeo = 60;
-const char *g_pid_file = NULL;
-const char *g_crypto_passwd = "";
-char g_crypto_passwd_md5sum[16];
-AES_KEY g_encrypt_key;
-AES_KEY g_decrypt_key;
-struct in_addr g_local_tun_in;
-struct in6_addr g_local_tun_in6;
-
-char g_devname[40];
-static unsigned g_tun_mtu = 1416;
-bool g_in_background = false;
+struct minivtun_config config = {
+	.reconnect_timeo = 13,
+	.keepalive_timeo = 60,
+	.pid_file = NULL,
+	.devname = "",
+	.in_background = false,
+	.crypto_passwd = "",
+};
 
 static struct option long_opts[] = {
 	{ "local", required_argument, 0, 'l', },
@@ -65,14 +60,15 @@ static void print_help(int argc, char *argv[])
 	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
-	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", g_tun_mtu);
-	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", g_keepalive_timeo);
+	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
+	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
 	printf("  -n, --ifname <ifname>               virtual interface name\n");
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
 	printf("  -e, --encryption-key <encrypt_key>  shared password for data encryption\n");
 	printf("  -v, --route <network/prefix=gateway>\n");
 	printf("                                      route a network to a client address, can be multiple\n");
 	printf("  -N, --no-encryption                 turn off encryption for tunnelling data\n");
+	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
 }
@@ -161,29 +157,29 @@ int main(int argc, char *argv[])
 			tun_ip6_config = optarg;
 			break;
 		case 'm':
-			g_tun_mtu = (unsigned)strtoul(optarg, NULL, 10);
+			config.tun_mtu = (unsigned)strtoul(optarg, NULL, 10);
 			break;
 		case 't':
-			g_keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
+			config.keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
 			break;
 		case 'n':
-			strncpy(g_devname, optarg, sizeof(g_devname) - 1);
-			g_devname[sizeof(g_devname) - 1] = '\0';
+			strncpy(config.devname, optarg, sizeof(config.devname) - 1);
+			config.devname[sizeof(config.devname) - 1] = '\0';
 			break;
 		case 'p':
-			g_pid_file = optarg;
+			config.pid_file = optarg;
 			break;
 		case 'e':
-			g_crypto_passwd = optarg;
+			config.crypto_passwd = optarg;
 			break;
 		case 'v':
 			parse_virtual_route(optarg);
 			break;
 		case 'N':
-			g_crypto_passwd = NULL;
+			config.crypto_passwd = NULL;
 			break;
 		case 'd':
-			g_in_background = true;
+			config.in_background = true;
 			break;
 		case 'h':
 			print_help(argc, argv);
@@ -194,9 +190,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (strlen(g_devname) == 0)
-		strcpy(g_devname, "mv%d");
-	if ((tunfd = tun_alloc(g_devname)) < 0) {
+	if (strlen(config.devname) == 0)
+		strcpy(config.devname, "mv%d");
+	if ((tunfd = tun_alloc(config.devname)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -221,16 +217,16 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "*** Invalid local IPv4 address: %s.\n", s_lip);
 			exit(1);
 		}
-		g_local_tun_in = vaddr;
+		config.local_tun_in = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			struct in_addr __network = { .s_addr = 0 };
-			sprintf(cmd, "ifconfig %s %s pointopoint %s", g_devname, s_lip, s_rip);
+			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.devname, s_lip, s_rip);
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
 			uint32_t mask = ~((1 << (32 - na)) - 1);
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
 					(mask >> 8) & 0xff, mask & 0xff);
-			sprintf(cmd, "ifconfig %s %s netmask %s", g_devname, s_lip, s_rip);
+			sprintf(cmd, "ifconfig %s %s netmask %s", config.devname, s_lip, s_rip);
 		} else {
 			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
 					s_rip);
@@ -259,24 +255,24 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "*** Invalid local IPv6 address: %s.\n", s_lip);
 			exit(1);
 		}
-		g_local_tun_in6 = vaddr;
+		config.local_tun_in6 = vaddr;
 		if (!(sscanf(s_pfx, "%d", &pfx_len) == 1 && pfx_len > 0 && pfx_len <= 128)) {
 			fprintf(stderr, "*** Not a legal prefix length: %s.\n", s_pfx);
 			exit(1);
 		}
 
-		sprintf(cmd, "ifconfig %s add %s/%d", g_devname, s_lip, pfx_len);
+		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfx_len);
 		(void)system(cmd);
 	}
 
 	/* Always bring it up with proper MTU size. */
-	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", g_devname, g_tun_mtu, g_devname);
+	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", config.devname, config.tun_mtu, config.devname);
 	(void)system(cmd);
 
-	if (g_crypto_passwd) {
-		gen_encrypt_key(&g_encrypt_key, g_crypto_passwd);
-		gen_decrypt_key(&g_decrypt_key, g_crypto_passwd);
-		gen_string_md5sum(g_crypto_passwd_md5sum, g_crypto_passwd);
+	if (config.crypto_passwd) {
+		gen_encrypt_key(&config.encrypt_key, config.crypto_passwd);
+		gen_decrypt_key(&config.decrypt_key, config.crypto_passwd);
+		gen_string_md5sum(config.crypto_passwd_md5sum, config.crypto_passwd);
 	} else {
 		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");
 	}

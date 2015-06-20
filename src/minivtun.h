@@ -9,6 +9,24 @@
 
 #include "library.h"
 
+extern struct minivtun_config config;
+
+struct minivtun_config {
+	unsigned reconnect_timeo;
+	unsigned keepalive_timeo;
+	const char *pid_file;
+	char devname[40];
+	unsigned tun_mtu;
+	bool in_background;
+
+	AES_KEY encrypt_key;
+	AES_KEY decrypt_key;
+	const char *crypto_passwd;
+	char crypto_passwd_md5sum[16];
+	struct in_addr local_tun_in;
+	struct in6_addr local_tun_in6;
+};
+
 enum {
 	MINIVTUN_MSG_KEEPALIVE,
 	MINIVTUN_MSG_IPDATA,
@@ -40,31 +58,18 @@ struct minivtun_msg {
 #define MINIVTUN_MSG_BASIC_HLEN (sizeof(((struct minivtun_msg *)0)->hdr))
 #define MINIVTUN_MSG_IPDATA_OFFSET (offsetof(struct minivtun_msg, ipdata.data))
 
-extern unsigned g_reconnect_timeo;
-extern unsigned g_keepalive_timeo;
-extern const char *g_pid_file;
-extern char g_devname[];
-extern bool g_in_background;
-
-extern AES_KEY g_encrypt_key;
-extern AES_KEY g_decrypt_key;
-extern const char *g_crypto_passwd;
-extern char g_crypto_passwd_md5sum[];
-extern struct in_addr g_local_tun_in;
-extern struct in6_addr g_local_tun_in6;
-
 static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
 {
-	if (g_crypto_passwd) {
-		bytes_encrypt(&g_encrypt_key, in, *out, dlen);
+	if (config.crypto_passwd) {
+		bytes_encrypt(&config.encrypt_key, in, *out, dlen);
 	} else {
 		*out = (void *)in;
 	}
 }
 static inline void netmsg_to_local(const void *in, void **out, size_t *dlen)
 {
-	if (g_crypto_passwd) {
-		bytes_decrypt(&g_decrypt_key, in, *out, dlen);
+	if (config.crypto_passwd) {
+		bytes_decrypt(&config.decrypt_key, in, *out, dlen);
 	} else {
 		*out = (void *)in;
 	}

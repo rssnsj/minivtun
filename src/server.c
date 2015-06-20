@@ -344,10 +344,10 @@ static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
 
 	nmsg->hdr.opcode = MINIVTUN_MSG_KEEPALIVE;
 	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
-	memcpy(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+	memcpy(nmsg->hdr.passwd_md5sum, config.crypto_passwd_md5sum,
 		sizeof(nmsg->hdr.passwd_md5sum));
-	nmsg->keepalive.loc_tun_in = g_local_tun_in;
-	nmsg->keepalive.loc_tun_in6 = g_local_tun_in6;
+	nmsg->keepalive.loc_tun_in = config.local_tun_in;
+	nmsg->keepalive.loc_tun_in6 = config.local_tun_in6;
 
 	out_msg = crypt_buffer;
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
@@ -383,7 +383,7 @@ static void va_ra_walk_continue(int sockfd)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
-				if (current_ts - ce->last_recv > g_reconnect_timeo) {
+				if (current_ts - ce->last_recv > config.reconnect_timeo) {
 					tun_client_release(ce);
 				}
 				va_count++;
@@ -396,11 +396,11 @@ static void va_ra_walk_continue(int sockfd)
 	if (ra_walk_max > 0) {
 		do {
 			list_for_each_entry_safe (re, __re, &ra_set_hbase[ra_index], list) {
-				if (current_ts - re->last_recv > g_reconnect_timeo) {
+				if (current_ts - re->last_recv > config.reconnect_timeo) {
 					if (re->refs == 0) {
 						ra_entry_release(re);
 					}
-				} else if (current_ts - re->last_xmit > g_keepalive_timeo) {
+				} else if (current_ts - re->last_xmit > config.keepalive_timeo) {
 					ra_entry_keepalive(re, sockfd);
 				}
 				ra_count++;
@@ -476,7 +476,7 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
  
 	/* Verify password. */
-	if (memcmp(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum, 16) != 0)
+	if (memcmp(nmsg->hdr.passwd_md5sum, config.crypto_passwd_md5sum, 16) != 0)
 		return 0;
 
 	switch (nmsg->hdr.opcode) {
@@ -608,7 +608,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
 	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
-	memcpy(nmsg.hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+	memcpy(nmsg.hdr.passwd_md5sum, config.crypto_passwd_md5sum,
 		sizeof(nmsg.hdr.passwd_md5sum));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
@@ -644,7 +644,7 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	inet_ntop(loc_addr.sin_family, &loc_addr.sin_addr,
 		s_loc_addr, sizeof(s_loc_addr));
 	printf("Mini virtual tunnelling server on %s:%u, interface: %s.\n",
-		s_loc_addr, ntohs(loc_addr.sin_port), g_devname);
+		s_loc_addr, ntohs(loc_addr.sin_port), config.devname);
 
 	/* Initialize address map hash table. */
 	init_va_ra_maps();
@@ -661,11 +661,11 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	set_nonblock(sockfd);
 
 	/* Run in background. */
-	if (g_in_background)
+	if (config.in_background)
 		do_daemonize();
-	if (g_pid_file) {
+	if (config.pid_file) {
 		FILE *fp;
-		if ((fp = fopen(g_pid_file, "w"))) {
+		if ((fp = fopen(config.pid_file, "w"))) {
 			fprintf(fp, "%d\n", (int)getpid());
 			fclose(fp);
 		}

@@ -52,7 +52,7 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
  
 	/* Verify password. */
-	if (memcmp(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum, 16) != 0)
+	if (memcmp(nmsg->hdr.passwd_md5sum, config.crypto_passwd_md5sum, 16) != 0)
 		return 0;
 
 	last_recv = current_ts;
@@ -123,7 +123,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
 	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
-	memcpy(nmsg.hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+	memcpy(nmsg.hdr.passwd_md5sum, config.crypto_passwd_md5sum,
 		sizeof(nmsg.hdr.passwd_md5sum));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
@@ -156,10 +156,10 @@ static int peer_keepalive(int sockfd)
 
 	nmsg->hdr.opcode = MINIVTUN_MSG_KEEPALIVE;
 	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
-	memcpy(nmsg->hdr.passwd_md5sum, g_crypto_passwd_md5sum,
+	memcpy(nmsg->hdr.passwd_md5sum, config.crypto_passwd_md5sum,
 		sizeof(nmsg->hdr.passwd_md5sum));
-	nmsg->keepalive.loc_tun_in = g_local_tun_in;
-	nmsg->keepalive.loc_tun_in6 = g_local_tun_in6;
+	nmsg->keepalive.loc_tun_in = config.local_tun_in;
+	nmsg->keepalive.loc_tun_in6 = config.local_tun_in6;
 
 	out_msg = crypt_buffer;
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
@@ -191,7 +191,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
 		s_peer_addr, sizeof(s_peer_addr));
 	printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
-		s_peer_addr, ntohs(peer_addr.sin_port), g_devname);
+		s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
 
 	/* The initial tunnelling connection. */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
@@ -201,12 +201,12 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	set_nonblock(sockfd);
 
 	/* Run in background. */
-	if (g_in_background)
+	if (config.in_background)
 		do_daemonize();
 
-	if (g_pid_file) {
+	if (config.pid_file) {
 		FILE *fp;
-		if ((fp = fopen(g_pid_file, "w"))) {
+		if ((fp = fopen(config.pid_file, "w"))) {
 			fprintf(fp, "%d\n", (int)getpid());
 			fclose(fp);
 		}
@@ -237,12 +237,12 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			last_keepalive = current_ts;
 
 		/* Packet transmission timed out, send keep-alive packet. */
-		if (current_ts - last_keepalive > g_keepalive_timeo) {
+		if (current_ts - last_keepalive > config.keepalive_timeo) {
 			peer_keepalive(sockfd);
 		}
 
 		/* Connection timed out, try reconnecting. */
-		if (current_ts - last_recv > g_reconnect_timeo) {
+		if (current_ts - last_recv > config.reconnect_timeo) {
 			if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
 				fprintf(stderr, "*** Failed to resolve '%s'.\n", peer_addr_pair);
 				continue;
