@@ -254,14 +254,19 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			if (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
+			while (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
 				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
 					peer_addr_pair);
 				sleep(5);
-				continue;
 			}
 
-			/* Reconnected OK. */
+			/* Reconnected OK. Reopen the socket for a different local port. */
+			close(sockfd);
+			if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+				exit(1);
+			}
+
 			last_keepalive = 0;
 			last_recv = current_ts;
 
