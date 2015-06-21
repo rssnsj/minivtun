@@ -17,7 +17,6 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <netinet/ether.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
