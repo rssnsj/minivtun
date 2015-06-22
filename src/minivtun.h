@@ -20,6 +20,7 @@ struct minivtun_config {
 	const char *pid_file;
 	bool in_background;
 	bool wait_dns;
+	unsigned lfn_latency;
 
 	AES_KEY encrypt_key;
 	AES_KEY decrypt_key;

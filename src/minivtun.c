@@ -31,6 +31,7 @@ struct minivtun_config config = {
 	.pid_file = NULL,
 	.in_background = false,
 	.wait_dns = false,
+	.lfn_latency = 300,
 };
 
 static struct option long_opts[] = {

@@ -25,9 +25,66 @@
 #include <linux/if_tun.h>
 
 #include "minivtun.h"
+#include "list.h"
 
 static struct timeval last_recv_tv = {0, 0}, last_keepalive_tv = {0, 0}, current_tv = {0, 0};
 static struct sockaddr_in peer_addr;
+
+/* Description of delayed transmitted packet. */
+struct lfn_task_packet {
+	struct list_head list;
+	int dir;
+	struct timeval recv_tv;
+	struct sockaddr_in xmit_addr;
+	size_t out_dlen;
+	char out_data[1];
+};
+enum lfn_task_dir {
+	LFN_TASK_TO_NETWORK,
+	LFN_TASK_TO_TUNNEL,
+};
+
+static struct list_head lfn_task_queue;
+
+static void lfn_task_enqueue(int dir, struct sockaddr_in *xmit_addr,
+		const void *data1, size_t len1, const void *data2, size_t len2)
+{
+	struct lfn_task_packet *lt;
+
+	if ((lt = malloc(sizeof(struct lfn_task_packet) + len1 + len2)) == NULL) {
+		fprintf(stderr, "*** malloc() error: %s.\n", strerror(errno));
+		return;
+	}
+
+	lt->list.prev = lt->list.next = NULL;
+	lt->dir = dir;
+	lt->recv_tv = current_tv;
+	if (dir == LFN_TASK_TO_NETWORK) {
+		lt->xmit_addr = *xmit_addr;
+	} else {
+		memset(&lt->xmit_addr, 0x0, sizeof(lt->xmit_addr));
+	}
+	lt->out_dlen = len1 + len2;
+	if (len1)
+		memcpy(lt->out_data, data1, len1);
+	if (len2)
+		memcpy(lt->out_data + len1, data2, len2);
+
+	list_add_tail(&lt->list, &lfn_task_queue);
+}
+static inline int lfn_task_empty(void)
+{
+	return list_empty(&lfn_task_queue);
+}
+static inline struct lfn_task_packet *lfn_task_first(void)
+{
+	return list_first_entry(&lfn_task_queue, struct lfn_task_packet, list);
+}
+static inline void lfn_task_del(struct lfn_task_packet *lt)
+{
+	list_del(&lt->list);
+	free(lt);
+}
 
 static int network_receiving(int tunfd, int sockfd)
 {
@@ -38,7 +95,7 @@ static int network_receiving(int tunfd, int sockfd)
 	size_t ip_dlen, out_dlen;
 	struct sockaddr_in real_peer;
 	socklen_t real_peer_alen;
-	struct iovec iov[2];
+	//struct iovec iov[2];
 	int rc;
 
 	real_peer_alen = sizeof(real_peer);
@@ -84,11 +141,13 @@ static int network_receiving(int tunfd, int sockfd)
 
 		pi.flags = 0;
 		pi.proto = nmsg->ipdata.proto;
-		iov[0].iov_base = &pi;
-		iov[0].iov_len = sizeof(pi);
-		iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
-		iov[1].iov_len = ip_dlen;
-		rc = writev(tunfd, iov, 2);
+		//iov[0].iov_base = &pi;
+		//iov[0].iov_len = sizeof(pi);
+		//iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
+		//iov[1].iov_len = ip_dlen;
+		//rc = writev(tunfd, iov, 2);
+		lfn_task_enqueue(LFN_TASK_TO_TUNNEL, NULL, &pi, sizeof(pi),
+			(char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET, ip_dlen);
 		break;
 	}
 
@@ -138,14 +197,17 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = sendto(sockfd, out_data, out_dlen, 0,
-		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	//rc = sendto(sockfd, out_data, out_dlen, 0,
+	//	(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	lfn_task_enqueue(LFN_TASK_TO_NETWORK, &peer_addr,
+		out_data, out_dlen, NULL, 0);
+
 	/**
 	 * NOTICE: Don't update this on each tunnel packet
 	 * transmit. We always need to keep the local virtual IP
 	 * (-a local/...) alive.
 	 */
-	/* last_keepalive = current_ts; */
+	/* last_keepalive_tv = current_tv; */
 
 	return 0;
 }
@@ -172,7 +234,7 @@ static int peer_keepalive(int sockfd)
 	rc = sendto(sockfd, out_msg, out_len, 0,
 		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
 
-	/* Update 'last_keepalive' only when it's really sent out. */
+	/* Update 'last_keepalive_tv' only when it's really sent out. */
 	if (rc > 0) {
 		last_keepalive_tv = current_tv;
 	}
@@ -216,6 +278,11 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	}
 	set_nonblock(sockfd);
 
+	/* =================================================== */
+	/* Initialize the buffering queue. */
+	INIT_LIST_HEAD(&lfn_task_queue);
+	/* =================================================== */
+
 	/* Run in background. */
 	if (config.in_background)
 		do_daemonize();
@@ -246,6 +313,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		}
 
 		gettimeofday(&current_tv, NULL);
+
 		if (timercmp(&last_recv_tv, &current_tv, >))
 			last_recv_tv = current_tv;
 		if (timercmp(&last_keepalive_tv, &current_tv, >))
@@ -284,6 +352,27 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* =================================================== */
 		/* Send backlog packets. */
+		while (!lfn_task_empty()) {
+			struct lfn_task_packet *lt = lfn_task_first();
+
+			/* Only handle timed out packets. */
+			timersub(&current_tv, &lt->recv_tv, &__subres);
+			if (__subres.tv_sec * 1000 + __subres.tv_usec / 1000 <
+				config.lfn_latency)
+				break;
+
+			switch (lt->dir) {
+			case LFN_TASK_TO_NETWORK:
+				sendto(sockfd, lt->out_data, lt->out_dlen, 0,
+					(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+				break;
+			case LFN_TASK_TO_TUNNEL:
+				write(tunfd, lt->out_data, lt->out_dlen);
+				break;
+			}
+
+			lfn_task_del(lt);
+		}
 		/* =================================================== */
 
 		/* No result from select(), do nothing. */

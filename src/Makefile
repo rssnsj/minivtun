@@ -8,15 +8,15 @@ CC ?= gcc
 CFLAGS += -Wall
 HEADERS = minivtun.h library.h list.h jhash.h
 
-lnf-emulator: minivtun.o library.o server.o client.o
+lfn-emulator: minivtun.o library.o server.o client.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lcrypto
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-install: lnf-emulator
-	cp -f lnf-emulator /usr/sbin/
+install: lfn-emulator
+	cp -f lfn-emulator /usr/sbin/
 
 clean:
-	rm -f lnf-emulator *.o
+	rm -f lfn-emulator *.o
 
