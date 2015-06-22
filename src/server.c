@@ -18,6 +18,9 @@
 #include <sys/uio.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#ifndef ETH_P_IP
+	#include <netinet/ether.h>
+#endif
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
