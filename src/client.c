@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -25,7 +26,7 @@
 
 #include "minivtun.h"
 
-static time_t last_recv = 0, last_keepalive = 0, current_ts = 0;
+static struct timeval last_recv_tv = {0, 0}, last_keepalive_tv = {0, 0}, current_tv = {0, 0};
 static struct sockaddr_in peer_addr;
 
 static int network_receiving(int tunfd, int sockfd)
@@ -58,7 +59,7 @@ static int network_receiving(int tunfd, int sockfd)
 	if (memcmp(nmsg->hdr.passwd_md5sum, config.crypto_passwd_md5sum, 16) != 0)
 		return 0;
 
-	last_recv = current_ts;
+	last_recv_tv = current_tv;
 
 	switch (nmsg->hdr.opcode) {
 	case MINIVTUN_MSG_KEEPALIVE:
@@ -173,7 +174,7 @@ static int peer_keepalive(int sockfd)
 
 	/* Update 'last_keepalive' only when it's really sent out. */
 	if (rc > 0) {
-		last_keepalive = current_ts;
+		last_keepalive_tv = current_tv;
 	}
 
 	return rc;
@@ -181,21 +182,21 @@ static int peer_keepalive(int sockfd)
 
 int run_client(int tunfd, const char *peer_addr_pair)
 {
-	struct timeval timeo;
+	struct timeval timeo, __subres;
 	int sockfd, rc;
 	fd_set rset;
 	char s_peer_addr[44];
 
 	if ((rc = v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
-		last_recv = time(NULL);
+		gettimeofday(&last_recv_tv, NULL);
 		inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
 			s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
 			s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
 	} else if (rc == -EAGAIN && config.wait_dns) {
 		/* Resolve later (last_recv = 0). */
-		last_recv = 0;
+		last_recv_tv.tv_sec = last_recv_tv.tv_usec = 0;
 		printf("Mini virtual tunnelling client, interface: %s. \n", config.devname);
 		printf("WARNING: DNS resolution of '%s' temporarily unavailable, "
 			"resolving later.\n", peer_addr_pair);
@@ -228,15 +229,15 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	}
 
 	/* For triggering the first keep-alive packet to be sent. */
-	last_keepalive = 0;
+	last_keepalive_tv.tv_sec = last_keepalive_tv.tv_usec = 0;
 
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(tunfd, &rset);
 		FD_SET(sockfd, &rset);
 
-		timeo.tv_sec = 2;
-		timeo.tv_usec = 0;
+		timeo.tv_sec = 0;
+		timeo.tv_usec = 2000;
 
 		rc = select((tunfd > sockfd ? tunfd : sockfd) + 1, &rset, NULL, NULL, &timeo);
 		if (rc < 0) {
@@ -244,19 +245,21 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			return -1;
 		}
 
-		current_ts = time(NULL);
-		if (last_recv > current_ts)
-			last_recv = current_ts;
-		if (last_keepalive > current_ts)
-			last_keepalive = current_ts;
+		gettimeofday(&current_tv, NULL);
+		if (timercmp(&last_recv_tv, &current_tv, >))
+			last_recv_tv = current_tv;
+		if (timercmp(&last_keepalive_tv, &current_tv, >))
+			last_keepalive_tv = current_tv;
 
 		/* Packet transmission timed out, send keep-alive packet. */
-		if (current_ts - last_keepalive > config.keepalive_timeo) {
+		timersub(&current_tv, &last_keepalive_tv, &__subres);
+		if (__subres.tv_sec >= config.keepalive_timeo) {
 			peer_keepalive(sockfd);
 		}
 
 		/* Connection timed out, try reconnecting. */
-		if (current_ts - last_recv > config.reconnect_timeo) {
+		timersub(&current_tv, &last_recv_tv, &__subres);
+		if (__subres.tv_sec >= config.reconnect_timeo) {
 			while (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
 				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
 					peer_addr_pair);
@@ -270,14 +273,18 @@ int run_client(int tunfd, const char *peer_addr_pair)
 				exit(1);
 			}
 
-			last_keepalive = 0;
-			last_recv = current_ts;
+			last_keepalive_tv.tv_sec = last_keepalive_tv.tv_usec = 0;
+			last_recv_tv = current_tv;
 
 			inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
 				s_peer_addr, sizeof(s_peer_addr));
 			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(peer_addr.sin_port));
 			continue;
 		}
+
+		/* =================================================== */
+		/* Send backlog packets. */
+		/* =================================================== */
 
 		/* No result from select(), do nothing. */
 		if (rc == 0)
