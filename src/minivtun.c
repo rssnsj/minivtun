@@ -23,8 +23,8 @@
 #include "minivtun.h"
 
 struct minivtun_config config = {
-	.reconnect_timeo = 13,
-	.keepalive_timeo = 60,
+	.keepalive_timeo = 13,
+	.reconnect_timeo = 60,
 	.devname = "",
 	.tun_mtu = 1416,
 	.crypto_passwd = "",
