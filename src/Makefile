@@ -22,3 +22,4 @@ clean:
 
 up:
 	rsync ../ root@rssn.cn:minivtun/ -av  --exclude='*.o' --exclude='minivtun'
+

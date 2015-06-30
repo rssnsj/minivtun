@@ -89,7 +89,7 @@ static inline bool is_valid_unicast_in(struct in_addr *in)
 
 static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 {
-	uint32_t a0 = ntohl(in6->s6_addr32[0]);
+	uint32_t a0 = ntohl(((__be32 *)in6)[0]);
 	return  ((a0 & 0xff000000) != 0x00000000) &&
 			((a0 & 0xff000000) != 0xff000000);
 }
