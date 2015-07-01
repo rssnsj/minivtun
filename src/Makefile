@@ -6,7 +6,7 @@
 
 CC ?= gcc
 CFLAGS += -Wall
-HEADERS = minivtun.h library.h list.h jhash.h macosx.h
+HEADERS = minivtun.h library.h list.h jhash.h
 
 minivtun: minivtun.o library.o server.o client.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lcrypto
@@ -19,7 +19,4 @@ install: minivtun
 
 clean:
 	rm -f minivtun *.o
-
-up:
-	rsync ../ root@rssn.cn:minivtun/ -av  --exclude='*.o' --exclude='minivtun'
 

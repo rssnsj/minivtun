@@ -38,14 +38,44 @@
 
 #ifdef __APPLE__
 	#include <net/if.h>
-	#include "macosx.h"
-	#define TUNDEV_PATH_1 "/dev/tun0"
-	#define TUNDEV_PATH_2 "/dev/tun1"
+
+	/* Protocol info prepended to the packets */
+	struct tun_pi {
+		__u16  flags;
+		__be16 proto;
+	};
+	#define TUNSIFHEAD  _IOW('t', 96, int)
+	#define TUNGIFHEAD  _IOR('t', 97, int)
+
+	/* Conversion between address family & ethernet type. */
+	static inline void osx_af_to_ether(__be16 *proto)
+	{
+		switch (ntohs(*proto)) {
+		case AF_INET:
+			*proto = htons(ETH_P_IP);
+			break;
+		case AF_INET6:
+			*proto = htons(ETH_P_IPV6);
+			break;
+		}
+	}
+	static inline void osx_ether_to_af(__be16 *proto)
+	{
+		switch (ntohs(*proto)) {
+		case ETH_P_IP:
+			*proto = htons(AF_INET);
+			break;
+		case ETH_P_IPV6:
+			*proto = htons(AF_INET6);
+			break;
+		}
+	}
 #else
 	#include <linux/if.h>
 	#include <linux/if_tun.h>
-	#define TUNDEV_PATH_1 "/dev/net/tun"
-	#define TUNDEV_PATH_2 "/dev/tun"
+
+	#define osx_af_to_ether(x)
+	#define osx_ether_to_af(x)
 #endif
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
@@ -101,22 +131,22 @@ static inline void bytes_decrypt(AES_KEY *key, const void *in, void *out, size_t
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
+static inline bool is_in6_equal(const struct in6_addr *a1, const struct in6_addr *a2)
+{
+	const __be32 *b1 = (__be32 *)a1, *b2 = (__be32 *)a2;
+	if (b1[0] == b2[0] && b1[1] == b2[1] &&
+		b1[2] == b2[2] && b1[3] == b2[3]) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {
 	uint32_t a = ntohl(in->s_addr);
 	return  ((a & 0xff000000) != 0x00000000) &&
 			((a & 0xf0000000) != 0xe0000000);
-}
-
-static inline bool is_in6_equal(const struct in6_addr *a, const struct in6_addr *b)
-{
-	const __be32 *aa = (__be32 *)a, *ba = (__be32 *)b;
-	if (aa[0] == ba[0] && aa[1] == ba[1] &&
-		aa[2] == ba[2] && aa[3] == ba[3]) {
-		return true;
-	} else {
-		return false;
-	}
 }
 
 static inline bool is_valid_unicast_in6(struct in6_addr *in6)
@@ -125,10 +155,6 @@ static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 	return  ((a0 & 0xff000000) != 0x00000000) &&
 			((a0 & 0xff000000) != 0xff000000);
 }
-
-int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr);
-
-int do_daemonize(void);
 
 static inline int set_nonblock(int sockfd)
 {
@@ -144,6 +170,9 @@ static inline void hexdump(void *d, size_t len)
 		printf("%02x ", (unsigned int)*s);
 	printf("\n");
 }
+
+int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr);
+int do_daemonize(void);
 
 #endif /* __LIBRARY_H */
 
