@@ -377,6 +377,7 @@ static void va_ra_walk_continue(int sockfd)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
+				(void)tun_client_dump;
 				if (current_ts - ce->last_recv > config.reconnect_timeo) {
 					tun_client_release(ce);
 				}
