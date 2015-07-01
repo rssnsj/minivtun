@@ -17,6 +17,8 @@
 
 #define __be32 uint32_t
 #define __be16 uint16_t
+#define __u32 uint32_t
+#define __u16 uint16_t
 #define __u8 uint8_t
 
 #define bool char
@@ -26,6 +28,25 @@
 #define container_of(ptr, type, member) ({			\
 	const typeof(((type *)0)->member) * __mptr = (ptr);	\
 	(type *)((char *)__mptr - offsetof(type, member)); })
+
+#ifndef ETH_P_IP
+	#define ETH_P_IP 0x0800 /* Internet Protocol packet */
+#endif
+#ifndef ETH_P_IPV6
+	#define ETH_P_IPV6 0x86dd /* IPv6 over bluebook */
+#endif
+
+#ifdef __APPLE__
+	#include <net/if.h>
+	#include "macosx.h"
+	#define TUNDEV_PATH_1 "/dev/tun0"
+	#define TUNDEV_PATH_2 "/dev/tun1"
+#else
+	#include <linux/if.h>
+	#include <linux/if_tun.h>
+	#define TUNDEV_PATH_1 "/dev/net/tun"
+	#define TUNDEV_PATH_2 "/dev/tun"
+#endif
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
@@ -85,6 +106,17 @@ static inline bool is_valid_unicast_in(struct in_addr *in)
 	uint32_t a = ntohl(in->s_addr);
 	return  ((a & 0xff000000) != 0x00000000) &&
 			((a & 0xf0000000) != 0xe0000000);
+}
+
+static inline bool is_in6_equal(const struct in6_addr *a, const struct in6_addr *b)
+{
+	const __be32 *aa = (__be32 *)a, *ba = (__be32 *)b;
+	if (aa[0] == ba[0] && aa[1] == ba[1] &&
+		aa[2] == ba[2] && aa[3] == ba[3]) {
+		return true;
+	} else {
+		return false;
+	}
 }
 
 static inline bool is_valid_unicast_in6(struct in6_addr *in6)

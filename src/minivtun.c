@@ -17,8 +17,6 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
 
 #include "minivtun.h"
 
@@ -80,11 +78,14 @@ static int tun_alloc(char *dev)
 	struct ifreq ifr;
 	int fd, err;
 
-	if ((fd = open("/dev/net/tun", O_RDWR)) < 0) {
-		if ((fd = open("/dev/tun", O_RDWR)) < 0)
+	if ((fd = open(TUNDEV_PATH_1, O_RDWR)) < 0) {
+		if ((fd = open(TUNDEV_PATH_2, O_RDWR)) < 0)
 			return -1;
 	}
 
+#ifdef __APPLE__
+	strcpy(dev, "tun0");
+#else
 	memset(&ifr, 0, sizeof(ifr));
 	/* Flags: IFF_TUN   - TUN device (no Ethernet headers)
 	 *        IFF_TAP   - TAP device
@@ -100,6 +101,8 @@ static int tun_alloc(char *dev)
 		return err;
 	}
 	strcpy(dev, ifr.ifr_name);
+#endif
+
 	return fd;
 }
 

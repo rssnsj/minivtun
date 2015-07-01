@@ -6,7 +6,7 @@
 
 CC ?= gcc
 CFLAGS += -Wall
-HEADERS = minivtun.h library.h list.h jhash.h
+HEADERS = minivtun.h library.h list.h jhash.h macosx.h
 
 minivtun: minivtun.o library.o server.o client.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lcrypto
