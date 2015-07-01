@@ -243,10 +243,15 @@ int main(int argc, char *argv[])
 #endif
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
+#ifdef __APPLE__
+			fprintf(stderr, "*** MAC OS X does not accept 'IP/netmask' for P-t-P interfaces.\n");
+			exit(1);
+#else
 			uint32_t mask = ~((1 << (32 - na)) - 1);
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
 					(mask >> 8) & 0xff, mask & 0xff);
 			sprintf(cmd, "ifconfig %s %s netmask %s", config.devname, s_lip, s_rip);
+#endif
 		} else {
 			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
 					s_rip);
