@@ -75,17 +75,20 @@ static void print_help(int argc, char *argv[])
 
 static int tun_alloc(char *dev)
 {
-	int fd, err;
+	int fd = -1, err;
 #ifdef __APPLE__
-	int b_enable = 1;
+	int b_enable = 1, i;
 
-	if ((fd = open("/dev/tun0", O_RDWR)) >= 0) {
-		strcpy(dev, "tun0");
-	} else if ((fd = open("/dev/tun1", O_RDWR)) >= 0) {
-		strcpy(dev, "tun1");
-	} else {
-		return -EINVAL;
+	for (i = 0; i < 8; i++) {
+		char dev_path[20];
+		sprintf(dev_path, "/dev/tun%d", i);
+		if ((fd = open(dev_path, O_RDWR)) >= 0) {
+			sprintf(dev, "tun%d", i);
+			break;
+		}
 	}
+	if (fd < 0)
+		return -EINVAL;
 
 	if ((err = ioctl(fd, TUNSIFHEAD, &b_enable)) < 0) {
 		close(fd);
