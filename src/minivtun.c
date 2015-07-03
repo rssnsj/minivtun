@@ -17,8 +17,6 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
 
 #include "minivtun.h"
 
@@ -78,29 +76,45 @@ static void print_help(int argc, char *argv[])
 
 static int tun_alloc(char *dev)
 {
-	struct ifreq ifr;
-	int fd, err;
+	int fd = -1, err;
+#ifdef __APPLE__
+	int b_enable = 1, i;
 
-	if ((fd = open("/dev/net/tun", O_RDWR)) < 0) {
-		if ((fd = open("/dev/tun", O_RDWR)) < 0)
-			return -1;
+	for (i = 0; i < 8; i++) {
+		char dev_path[20];
+		sprintf(dev_path, "/dev/tun%d", i);
+		if ((fd = open(dev_path, O_RDWR)) >= 0) {
+			sprintf(dev, "tun%d", i);
+			break;
+		}
+	}
+	if (fd < 0)
+		return -EINVAL;
+
+	if ((err = ioctl(fd, TUNSIFHEAD, &b_enable)) < 0) {
+		close(fd);
+		return err;
+	}
+#else
+	struct ifreq ifr;
+
+	if ((fd = open("/dev/net/tun", O_RDWR)) >= 0) {
+	} else if ((fd = open("/dev/tun", O_RDWR)) >= 0) {
+	} else {
+		return -EINVAL;
 	}
 
 	memset(&ifr, 0, sizeof(ifr));
-	/* Flags: IFF_TUN   - TUN device (no Ethernet headers)
-	 *        IFF_TAP   - TAP device
-	 *
-	 *        IFF_NO_PI - Do not provide packet information
-	 */
 	ifr.ifr_flags = IFF_TUN;
-	if (*dev)
+	if (dev[0])
 		strncpy(ifr.ifr_name, dev, IFNAMSIZ);
-
-	if ((err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0){
+	if ((err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0) {
 		close(fd);
 		return err;
 	}
 	strcpy(dev, ifr.ifr_name);
+#endif
+
 	return fd;
 }
 
@@ -226,13 +240,22 @@ int main(int argc, char *argv[])
 		config.local_tun_in = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			struct in_addr __network = { .s_addr = 0 };
+#ifdef __APPLE__
+			sprintf(cmd, "ifconfig %s %s %s", config.devname, s_lip, s_rip);
+#else
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.devname, s_lip, s_rip);
+#endif
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
+#ifdef __APPLE__
+			fprintf(stderr, "*** MAC OS X does not accept 'IP/netmask' for P-t-P interfaces.\n");
+			exit(1);
+#else
 			uint32_t mask = ~((1 << (32 - na)) - 1);
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
 					(mask >> 8) & 0xff, mask & 0xff);
 			sprintf(cmd, "ifconfig %s %s netmask %s", config.devname, s_lip, s_rip);
+#endif
 		} else {
 			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
 					s_rip);
@@ -267,7 +290,11 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 
+#ifdef __APPLE__
+		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.devname, s_lip, pfx_len);
+#else
 		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfx_len);
+#endif
 		(void)system(cmd);
 	}
 

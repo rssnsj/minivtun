@@ -4,8 +4,12 @@
 # https://github.com/rssnsj/minivtun
 #
 
+ifeq ($(PREFIX),)
+PREFIX := $(shell [ -d /opt/local ] && echo /opt/local || echo /usr )
+endif
+
 CC ?= gcc
-CFLAGS += -Wall
+CFLAGS += -Wall -Wno-deprecated
 HEADERS = minivtun.h library.h list.h jhash.h
 
 lfn-emulator: minivtun.o library.o server.o client.o
@@ -15,7 +19,7 @@ lfn-emulator: minivtun.o library.o server.o client.o
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 install: lfn-emulator
-	cp -f lfn-emulator /usr/sbin/
+	cp -f minivtun $(PREFIX)/sbin/
 
 clean:
 	rm -f lfn-emulator *.o

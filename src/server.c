@@ -18,11 +18,6 @@
 #include <sys/uio.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#ifndef ETH_P_IP
-	#include <netinet/ether.h>
-#endif
-#include <linux/if.h>
-#include <linux/if_tun.h>
 
 #include "list.h"
 #include "jhash.h"
@@ -200,10 +195,9 @@ static inline uint32_t tun_addr_hash(const struct tun_addr *addr)
 	if (addr->af == AF_INET) {
 		return jhash_2words(addr->af, addr->in.s_addr, hash_initval);
 	} else if (addr->af == AF_INET6) {
-		uint32_t __h = jhash_3words(addr->af, addr->in6.s6_addr32[0],
-				addr->in6.s6_addr32[1], hash_initval);
-		return jhash_2words(addr->in6.s6_addr32[2],
-				addr->in6.s6_addr32[3], __h);
+		const __be32 *aa = (void *)&addr->in6;
+		return jhash_2words(aa[2], aa[3],
+			jhash_3words(addr->af, aa[0], aa[1], hash_initval));
 	} else {
 		abort();
 		return 0;
@@ -223,10 +217,7 @@ static inline int tun_addr_comp(
 			return 1;
 		}
 	} else if (a1->af == AF_INET6) {
-		if (a1->in6.s6_addr32[0] == a2->in6.s6_addr32[0] &&
-			a1->in6.s6_addr32[1] == a2->in6.s6_addr32[1] &&
-			a1->in6.s6_addr32[2] == a2->in6.s6_addr32[2] &&
-			a1->in6.s6_addr32[3] == a2->in6.s6_addr32[3]) {
+		if (is_in6_equal(&a1->in6, &a2->in6)) {
 			return 0;
 		} else {
 			return 1;
@@ -386,6 +377,7 @@ static void va_ra_walk_continue(int sockfd)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
+				(void)tun_client_dump;
 				if (current_ts - ce->last_recv > config.reconnect_timeo) {
 					tun_client_release(ce);
 				}
@@ -532,6 +524,7 @@ static int network_receiving(int tunfd, int sockfd)
 
 		pi.flags = 0;
 		pi.proto = nmsg->ipdata.proto;
+		osx_ether_to_af(&pi.proto);
 		iov[0].iov_base = &pi;
 		iov[0].iov_len = sizeof(pi);
 		iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
@@ -559,12 +552,11 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	if (rc < sizeof(struct tun_pi))
 		return 0;
 
-	/* We only accept IPv4 or IPv6 frames. */
-	if (pi->proto != htons(ETH_P_IP) && pi->proto != htons(ETH_P_IPV6))
-		return 0;
+	osx_af_to_ether(&pi->proto);
 
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
 
+	/* We only accept IPv4 or IPv6 frames. */
 	if (pi->proto == htons(ETH_P_IP)) {
 		af = AF_INET;
 		if (ip_dlen < 20)

@@ -18,11 +18,6 @@
 #include <sys/uio.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#ifndef ETH_P_IP
-	#include <netinet/ether.h>
-#endif
-#include <linux/if.h>
-#include <linux/if_tun.h>
 
 #include "minivtun.h"
 #include "list.h"
@@ -141,6 +136,7 @@ static int network_receiving(int tunfd, int sockfd)
 
 		pi.flags = 0;
 		pi.proto = nmsg->ipdata.proto;
+		osx_ether_to_af(&pi.proto);
 		//iov[0].iov_base = &pi;
 		//iov[0].iov_len = sizeof(pi);
 		//iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
@@ -167,12 +163,11 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	if (rc < sizeof(struct tun_pi))
 		return 0;
 
-	/* We only accept IPv4 or IPv6 frames. */
-	if (pi->proto != htons(ETH_P_IP) && pi->proto != htons(ETH_P_IPV6))
-		return 0;
+	osx_af_to_ether(&pi->proto);
 
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
 
+	/* We only accept IPv4 or IPv6 frames. */
 	if (pi->proto == htons(ETH_P_IP)) {
 		if (ip_dlen < 20)
 			return 0;
