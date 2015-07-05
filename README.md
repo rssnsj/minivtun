@@ -8,7 +8,7 @@ A fast secure and reliable VPN service in non-standard protocol for rapidly depl
 * Rapid to deploy: a standalone program to run; all configuration are specified in command line with very few options.
 
 
-### Installation
+### Installation for Linux
 
     # Install required development components
     sudo apt-get install build-essential libssl-dev  # for Ubuntu
