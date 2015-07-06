@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
 	if (tun_ip_config) {
 		char s_lip[20], s_rip[20], *sp;
 		struct in_addr vaddr;
-		int na = 0;
+		int pfxlen = 0;
 
 		if (!(sp = strchr(tun_ip_config, '/'))) {
 			fprintf(stderr, "*** Invalid IPv4 address pair: %s.\n", tun_ip_config);
@@ -246,12 +246,15 @@ int main(int argc, char *argv[])
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.devname, s_lip, s_rip);
 #endif
 			vt_route_add(&__network, 0, &vaddr);
-		} else if (sscanf(s_rip, "%d", &na) == 1 && na > 0 && na < 31 ) {
+		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
+			uint32_t mask = ~((1 << (32 - pfxlen)) - 1);
 #ifdef __APPLE__
-			fprintf(stderr, "*** MAC OS X does not accept 'IP/netmask' for P-t-P interfaces.\n");
-			exit(1);
+			uint32_t network = ntohl(vaddr.s_addr) & mask;
+			sprintf(s_rip, "%u.%u.%u.%u", network >> 24, (network >> 16) & 0xff,
+					(network >> 8) & 0xff, network & 0xff);
+			sprintf(cmd, "ifconfig %s %s %s && route add -net %s/%d %s >/dev/null",
+					config.devname, s_lip, s_lip, s_rip, pfxlen, s_lip);
 #else
-			uint32_t mask = ~((1 << (32 - na)) - 1);
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
 					(mask >> 8) & 0xff, mask & 0xff);
 			sprintf(cmd, "ifconfig %s %s netmask %s", config.devname, s_lip, s_rip);
@@ -268,7 +271,7 @@ int main(int argc, char *argv[])
 	if (tun_ip6_config) {
 		char s_lip[50], s_pfx[20], *sp;
 		struct in6_addr vaddr;
-		int pfx_len = 0;
+		int pfxlen = 0;
 
 		if (!(sp = strchr(tun_ip6_config, '/'))) {
 			fprintf(stderr, "*** Invalid IPv6 address pair: %s.\n", tun_ip6_config);
@@ -285,15 +288,15 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		config.local_tun_in6 = vaddr;
-		if (!(sscanf(s_pfx, "%d", &pfx_len) == 1 && pfx_len > 0 && pfx_len <= 128)) {
+		if (!(sscanf(s_pfx, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen <= 128)) {
 			fprintf(stderr, "*** Not a legal prefix length: %s.\n", s_pfx);
 			exit(1);
 		}
 
 #ifdef __APPLE__
-		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.devname, s_lip, pfx_len);
+		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.devname, s_lip, pfxlen);
 #else
-		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfx_len);
+		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfxlen);
 #endif
 		(void)system(cmd);
 	}
