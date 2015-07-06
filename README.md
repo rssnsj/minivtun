@@ -10,10 +10,13 @@ A fast secure and reliable VPN service in non-standard protocol for rapidly depl
 
 ### Installation for Linux
 
-    # Install required development components
-    sudo apt-get install build-essential libssl-dev  # for Ubuntu
-      
-    # Compile and install
+Install required development components
+
+    sudo apt-get install build-essential libssl-dev   # for Ubuntu / Debian
+    sudo yum install make gcc openssl-devel   # for CentOS / Fedora / RedHat
+  
+Compile and install
+
     git clone https://github.com/rssnsj/minivtun.git minivtun
     cd minivtun/src
     make
@@ -23,7 +26,7 @@ A fast secure and reliable VPN service in non-standard protocol for rapidly depl
 
 Install TUNTAP driver for Mac OS X: http://tuntaposx.sourceforge.net/
 
-Compile and install:
+Compile and install
 
     git clone https://github.com/rssnsj/minivtun.git minivtun
     cd minivtun/src
