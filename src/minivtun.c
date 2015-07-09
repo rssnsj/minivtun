@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
 	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", config.devname, config.tun_mtu, config.devname);
 	(void)system(cmd);
 
-	if (config.crypto_passwd) {
+	if (enabled_encryption()) {
 		gen_encrypt_key(&config.encrypt_key, config.crypto_passwd);
 		gen_decrypt_key(&config.decrypt_key, config.crypto_passwd);
 		gen_string_md5sum(config.crypto_passwd_md5sum, config.crypto_passwd);
