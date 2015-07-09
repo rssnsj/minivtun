@@ -40,9 +40,8 @@ static struct option long_opts[] = {
 	{ "keepalive", required_argument, 0, 't', },
 	{ "ifname", required_argument, 0, 'n', },
 	{ "pidfile", required_argument, 0, 'p', },
-	{ "encryption-key", required_argument, 0, 'e', },
+	{ "key", required_argument, 0, 'e', },
 	{ "route", required_argument, 0, 'v', },
-	{ "no-encryption", no_argument, 0, 'N', },
 	{ "daemon", no_argument, 0, 'd', },
 	{ "wait-dns", no_argument, 0, 'w', },
 	{ "help", no_argument, 0, 'h', },
@@ -64,10 +63,9 @@ static void print_help(int argc, char *argv[])
 	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
 	printf("  -n, --ifname <ifname>               virtual interface name\n");
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
-	printf("  -e, --encryption-key <encrypt_key>  shared password for data encryption\n");
+	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
 	printf("  -v, --route <network/prefix=gateway>\n");
 	printf("                                      route a network to a client address, can be multiple\n");
-	printf("  -N, --no-encryption                 turn off encryption for tunnelling data\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
@@ -156,7 +154,7 @@ int main(int argc, char *argv[])
 	char cmd[100];
 	int tunfd, opt;
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:Ndwh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:dwh",
 			long_opts, NULL)) != -1) {
 
 		switch (opt) {
@@ -190,9 +188,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'v':
 			parse_virtual_route(optarg);
-			break;
-		case 'N':
-			config.crypto_passwd = NULL;
 			break;
 		case 'd':
 			config.in_background = true;
