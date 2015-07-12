@@ -9,7 +9,7 @@ PREFIX := $(shell [ -d /opt/local ] && echo /opt/local || echo /usr )
 endif
 
 CC ?= gcc
-CFLAGS += -Wall -Wno-deprecated
+CFLAGS += -Wall
 HEADERS = minivtun.h library.h list.h jhash.h
 
 lfn-emulator: minivtun.o library.o server.o client.o

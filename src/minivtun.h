@@ -57,12 +57,14 @@ struct minivtun_msg {
 	};
 } __attribute__((packed));
 
-#define MINIVTUN_MSG_BASIC_HLEN (sizeof(((struct minivtun_msg *)0)->hdr))
-#define MINIVTUN_MSG_IPDATA_OFFSET (offsetof(struct minivtun_msg, ipdata.data))
+#define MINIVTUN_MSG_BASIC_HLEN  (sizeof(((struct minivtun_msg *)0)->hdr))
+#define MINIVTUN_MSG_IPDATA_OFFSET  (offsetof(struct minivtun_msg, ipdata.data))
+
+#define enabled_encryption()  (config.crypto_passwd[0])
 
 static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
 {
-	if (config.crypto_passwd) {
+	if (enabled_encryption()) {
 		bytes_encrypt(&config.encrypt_key, in, *out, dlen);
 	} else {
 		*out = (void *)in;
@@ -70,7 +72,7 @@ static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
 }
 static inline void netmsg_to_local(const void *in, void **out, size_t *dlen)
 {
-	if (config.crypto_passwd) {
+	if (enabled_encryption()) {
 		bytes_decrypt(&config.decrypt_key, in, *out, dlen);
 	} else {
 		*out = (void *)in;
