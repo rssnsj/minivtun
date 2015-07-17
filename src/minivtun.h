@@ -62,7 +62,7 @@ struct minivtun_msg {
 static inline void local_to_netmsg(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		bytes_encrypt(config.crypto_key, in, *out, dlen);
+		datagram_encrypt(config.crypto_key, in, *out, dlen);
 	} else {
 		*out = in;
 	}
@@ -70,7 +70,7 @@ static inline void local_to_netmsg(void *in, void **out, size_t *dlen)
 static inline void netmsg_to_local(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		bytes_decrypt(config.crypto_key, in, *out, dlen);
+		datagram_decrypt(config.crypto_key, in, *out, dlen);
 	} else {
 		*out = in;
 	}

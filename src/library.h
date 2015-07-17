@@ -12,8 +12,6 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <openssl/evp.h>
-#include <openssl/md5.h>
 
 #define __be32 uint32_t
 #define __be16 uint16_t
@@ -84,65 +82,9 @@
 #define CRYPTO_BLOCK_SIZE  16
 #define CRYPTO_ALGORITHM  EVP_aes_128_cbc()
 
-static inline void gen_string_md5sum(void *out, const char *in)
-{
-	MD5_CTX ctx;
-	MD5_Init(&ctx);
-	MD5_Update(&ctx, in, strlen(in));
-	MD5_Final(out, &ctx);
-}
-
-#define CRYPTO_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
-		0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, }
-
-#define CRYPTO_BYTES_PADDING(data, dlen, bs) \
-	do { \
-		size_t last_len = *(dlen) % (bs); \
-		if (last_len) { \
-			size_t padding_len = bs - last_len; \
-			memset((char *)data + *(dlen), 0x0, padding_len); \
-			*(dlen) += padding_len; \
-		} \
-	} while(0)
-
-
-static inline void bytes_encrypt(const void *key, void *in,
-		void *out, size_t *dlen)
-{
-	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
-	EVP_CIPHER_CTX ctx;
-	int outl = 0, outl2 = 0;
-
-	CRYPTO_BYTES_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
-
-	EVP_CIPHER_CTX_init(&ctx);
-	EVP_EncryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
-	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen);
-	EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
-	EVP_CIPHER_CTX_cleanup(&ctx);
-
-	*dlen = (size_t)(outl + outl2);
-}
-
-static inline void bytes_decrypt(const void *key, void *in,
-		void *out, size_t *dlen)
-{
-	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
-	EVP_CIPHER_CTX ctx;
-	int outl = 0, outl2 = 0;
-
-	CRYPTO_BYTES_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
-
-	EVP_CIPHER_CTX_init(&ctx);
-	EVP_DecryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
-	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen);
-	EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
-	EVP_CIPHER_CTX_cleanup(&ctx);
-
-	*dlen = (size_t)(outl + outl2);
-}
+void gen_string_md5sum(void *out, const char *in);
+void datagram_encrypt(const void *key, void *in, void *out, size_t *dlen);
+void datagram_decrypt(const void *key, void *in, void *out, size_t *dlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
