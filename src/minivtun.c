@@ -300,10 +300,9 @@ int main(int argc, char *argv[])
 	(void)system(cmd);
 
 	if (enabled_encryption()) {
-		gen_encrypt_key(&config.encrypt_key, config.crypto_passwd);
-		gen_decrypt_key(&config.decrypt_key, config.crypto_passwd);
-		gen_string_md5sum(config.crypto_passwd_md5sum, config.crypto_passwd);
+		gen_string_md5sum(config.crypto_key, config.crypto_passwd);
 	} else {
+		memset(config.crypto_key, 0x0, CRYPTO_KEY_SIZE);
 		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");
 	}
 

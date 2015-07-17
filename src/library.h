@@ -12,7 +12,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <openssl/aes.h>
+#include <openssl/evp.h>
 #include <openssl/md5.h>
 
 #define __be32 uint32_t
@@ -80,6 +80,10 @@
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
+#define CRYPTO_KEY_SIZE  16
+#define CRYPTO_BLOCK_SIZE  16
+#define CRYPTO_ALGORITHM  EVP_aes_128_cbc()
+
 static inline void gen_string_md5sum(void *out, const char *in)
 {
 	MD5_CTX ctx;
@@ -88,45 +92,56 @@ static inline void gen_string_md5sum(void *out, const char *in)
 	MD5_Final(out, &ctx);
 }
 
-static inline void gen_encrypt_key(AES_KEY *key, const char *passwd)
-{
-	char md[16];
-	gen_string_md5sum(md, passwd);
-	AES_set_encrypt_key((void *)md, 128, key);
-}
-
-static inline void gen_decrypt_key(AES_KEY *key, const char *passwd)
-{
-	char md[16];
-	gen_string_md5sum(md, passwd);
-	AES_set_decrypt_key((void *)&md, 128, key);
-}
-
-#define AES_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
+#define CRYPTO_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
 		0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, }
 
-static inline void bytes_encrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
+#define CRYPTO_BYTES_PADDING(data, dlen, bs) \
+	do { \
+		size_t last_len = *(dlen) % (bs); \
+		if (last_len) { \
+			size_t padding_len = bs - last_len; \
+			memset((char *)data + *(dlen), 0x0, padding_len); \
+			*(dlen) += padding_len; \
+		} \
+	} while(0)
+
+
+static inline void bytes_encrypt(const void *key, void *in,
+		void *out, size_t *dlen)
 {
-	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
-	size_t remain = *dlen % AES_BLOCK_SIZE;
-	if (remain) {
-		size_t padding = AES_BLOCK_SIZE - remain;
-		memset((char *)in + *dlen, 0x0, padding);
-		*dlen += padding;
-	}
-	AES_cbc_encrypt(in, out, *dlen, key, (void *)ivec, AES_ENCRYPT);
+	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
+	EVP_CIPHER_CTX ctx;
+	int outl = 0, outl2 = 0;
+
+	CRYPTO_BYTES_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
+
+	EVP_CIPHER_CTX_init(&ctx);
+	EVP_EncryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
+	EVP_CIPHER_CTX_set_padding(&ctx, 0);
+	EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen);
+	EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
+	EVP_CIPHER_CTX_cleanup(&ctx);
+
+	*dlen = (size_t)(outl + outl2);
 }
 
-static inline void bytes_decrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
+static inline void bytes_decrypt(const void *key, void *in,
+		void *out, size_t *dlen)
 {
-	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
-	size_t remain = *dlen % AES_BLOCK_SIZE;
-	if (remain) {
-		size_t padding = AES_BLOCK_SIZE - remain;
-		memset((char *)in + *dlen, 0x0, padding);
-		*dlen += padding;
-	}
-	AES_cbc_encrypt(in, out, *dlen, key, (void *)ivec, AES_DECRYPT);
+	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
+	EVP_CIPHER_CTX ctx;
+	int outl = 0, outl2 = 0;
+
+	CRYPTO_BYTES_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
+
+	EVP_CIPHER_CTX_init(&ctx);
+	EVP_DecryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
+	EVP_CIPHER_CTX_set_padding(&ctx, 0);
+	EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen);
+	EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
+	EVP_CIPHER_CTX_cleanup(&ctx);
+
+	*dlen = (size_t)(outl + outl2);
 }
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
