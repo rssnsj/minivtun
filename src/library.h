@@ -80,11 +80,13 @@
 
 #define CRYPTO_KEY_SIZE  16
 #define CRYPTO_BLOCK_SIZE  16
-#define CRYPTO_ALGORITHM  EVP_aes_128_cbc()
 
 void gen_string_md5sum(void *out, const char *in);
-void datagram_encrypt(const void *key, void *in, void *out, size_t *dlen);
-void datagram_decrypt(const void *key, void *in, void *out, size_t *dlen);
+const void *get_crypto_type(const char *name);
+void datagram_encrypt(const void *key, const void *crtype, void *in,
+		void *out, size_t *dlen);
+void datagram_decrypt(const void *key, const void *crtype, void *in,
+		void *out, size_t *dlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 

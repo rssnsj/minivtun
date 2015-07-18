@@ -26,6 +26,7 @@ struct minivtun_config config = {
 	.devname = "",
 	.tun_mtu = 1416,
 	.crypto_passwd = "",
+	.crypto_type = NULL,
 	.pid_file = NULL,
 	.in_background = false,
 	.wait_dns = false,
@@ -37,10 +38,11 @@ static struct option long_opts[] = {
 	{ "ipv4-addr", required_argument, 0, 'a', },
 	{ "ipv6-addr", required_argument, 0, 'A', },
 	{ "mtu", required_argument, 0, 'm', },
-	{ "keepalive", required_argument, 0, 't', },
+	{ "keepalive", required_argument, 0, 'k', },
 	{ "ifname", required_argument, 0, 'n', },
 	{ "pidfile", required_argument, 0, 'p', },
 	{ "key", required_argument, 0, 'e', },
+	{ "type", required_argument, 0, 't', },
 	{ "route", required_argument, 0, 'v', },
 	{ "daemon", no_argument, 0, 'd', },
 	{ "wait-dns", no_argument, 0, 'w', },
@@ -60,10 +62,11 @@ static void print_help(int argc, char *argv[])
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
 	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
-	printf("  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
+	printf("  -k, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
 	printf("  -n, --ifname <ifname>               virtual interface name\n");
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
 	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
+	printf("  -t, --type <encryption_type>        encryption type\n");
 	printf("  -v, --route <network/prefix=gateway>\n");
 	printf("                                      route a network to a client address, can be multiple\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
@@ -149,12 +152,12 @@ static void parse_virtual_route(const char *arg)
 int main(int argc, char *argv[])
 {
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
-	const char *loc_addr_pair = NULL;
-	const char *peer_addr_pair = NULL;
-	char cmd[100];
+	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
+	const char *crypto_type = "aes";
+	char cmd[128];
 	int tunfd, opt;
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:t:n:p:e:v:dwh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:k:n:p:e:t:v:dwh",
 			long_opts, NULL)) != -1) {
 
 		switch (opt) {
@@ -173,7 +176,7 @@ int main(int argc, char *argv[])
 		case 'm':
 			config.tun_mtu = (unsigned)strtoul(optarg, NULL, 10);
 			break;
-		case 't':
+		case 'k':
 			config.keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
 			break;
 		case 'n':
@@ -185,6 +188,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			config.crypto_passwd = optarg;
+			break;
+		case 't':
+			crypto_type = optarg;
 			break;
 		case 'v':
 			parse_virtual_route(optarg);
@@ -301,6 +307,10 @@ int main(int argc, char *argv[])
 
 	if (enabled_encryption()) {
 		gen_string_md5sum(config.crypto_key, config.crypto_passwd);
+		if ((config.crypto_type = get_crypto_type(crypto_type)) == NULL) {
+			fprintf(stderr, "*** No such encryption type defined: %s.\n", crypto_type);
+			exit(1);
+		}
 	} else {
 		memset(config.crypto_key, 0x0, CRYPTO_KEY_SIZE);
 		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");

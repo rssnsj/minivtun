@@ -26,8 +26,21 @@ void gen_string_md5sum(void *out, const char *in)
 	MD5_Final(out, &ctx);
 }
 
-#define CRYPTO_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
-		0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, }
+const void *get_crypto_type(const char *name)
+{
+	if (strcasecmp(name, "aes") == 0) {
+		return EVP_aes_128_cbc();
+	} else if (strcasecmp(name, "rc4") == 0) {
+		return EVP_rc4();
+	} else {
+		return NULL;
+	}
+}
+
+static const char crypto_ivec_initval[CRYPTO_BLOCK_SIZE] = {
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+};
 
 #define CRYPTO_DATA_PADDING(data, dlen, bs) \
 	do { \
@@ -39,16 +52,18 @@ void gen_string_md5sum(void *out, const char *in)
 		} \
 	} while(0)
 
-void datagram_encrypt(const void *key, void *in, void *out, size_t *dlen)
+void datagram_encrypt(const void *key, const void *crtype, void *in,
+		void *out, size_t *dlen)
 {
-	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
+	unsigned char ivec[CRYPTO_BLOCK_SIZE];
 	EVP_CIPHER_CTX ctx;
 	int outl = 0, outl2 = 0;
 
+	memcpy(ivec, crypto_ivec_initval, CRYPTO_BLOCK_SIZE);
 	CRYPTO_DATA_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
 
 	EVP_CIPHER_CTX_init(&ctx);
-	EVP_EncryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
+	EVP_EncryptInit_ex(&ctx, crtype, NULL, key, ivec);
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
 	EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen);
 	EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
@@ -57,16 +72,18 @@ void datagram_encrypt(const void *key, void *in, void *out, size_t *dlen)
 	*dlen = (size_t)(outl + outl2);
 }
 
-void datagram_decrypt(const void *key, void *in, void *out, size_t *dlen)
+void datagram_decrypt(const void *key, const void *crtype, void *in,
+		void *out, size_t *dlen)
 {
-	unsigned char ivec[CRYPTO_BLOCK_SIZE] = CRYPTO_IVEC_INITVAL;
+	unsigned char ivec[CRYPTO_BLOCK_SIZE];
 	EVP_CIPHER_CTX ctx;
 	int outl = 0, outl2 = 0;
 
+	memcpy(ivec, crypto_ivec_initval, CRYPTO_BLOCK_SIZE);
 	CRYPTO_DATA_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
 
 	EVP_CIPHER_CTX_init(&ctx);
-	EVP_DecryptInit_ex(&ctx, CRYPTO_ALGORITHM, NULL, key, ivec);
+	EVP_DecryptInit_ex(&ctx, crtype, NULL, key, ivec);
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
 	EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen);
 	EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);

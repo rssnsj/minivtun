@@ -22,6 +22,7 @@ struct minivtun_config {
 	bool wait_dns;
 
 	char crypto_key[CRYPTO_KEY_SIZE];
+	const void *crypto_type;
 	struct in_addr local_tun_in;
 	struct in6_addr local_tun_in6;
 };
@@ -62,7 +63,7 @@ struct minivtun_msg {
 static inline void local_to_netmsg(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		datagram_encrypt(config.crypto_key, in, *out, dlen);
+		datagram_encrypt(config.crypto_key, config.crypto_type, in, *out, dlen);
 	} else {
 		*out = in;
 	}
@@ -70,7 +71,7 @@ static inline void local_to_netmsg(void *in, void **out, size_t *dlen)
 static inline void netmsg_to_local(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		datagram_decrypt(config.crypto_key, in, *out, dlen);
+		datagram_decrypt(config.crypto_key, config.crypto_type, in, *out, dlen);
 	} else {
 		*out = in;
 	}
