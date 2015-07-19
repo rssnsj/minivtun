@@ -52,6 +52,8 @@ static struct option long_opts[] = {
 
 static void print_help(int argc, char *argv[])
 {
+	int i;
+
 	printf("Mini virtual tunneller in non-standard protocol.\n");
 	printf("Usage:\n");
 	printf("  %s [options]\n", argv[0]);
@@ -72,6 +74,11 @@ static void print_help(int argc, char *argv[])
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
+	printf("Supported encryption types:\n");
+	printf("  ");
+	for (i = 0; cipher_pairs[i].name; i++)
+		printf("%s, ", cipher_pairs[i].name);
+	printf("\n");
 }
 
 static int tun_alloc(char *dev)

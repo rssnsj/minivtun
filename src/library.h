@@ -84,6 +84,12 @@
 #define CRYPTO_MAX_KEY_SIZE  32
 #define CRYPTO_MAX_BLOCK_SIZE  32
 
+struct name_cipher_pair {
+	const char *name;
+	const void *cipher;
+};
+
+extern struct name_cipher_pair cipher_pairs[];
 const void *get_crypto_type(const char *name);
 void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen);

@@ -19,17 +19,13 @@
 
 #include "library.h"
 
-struct name_cipher_pair {
-	const char *name;
-	const EVP_CIPHER *(*cipher)(void);
-};
-
-static struct name_cipher_pair cipher_pairs[] = {
+struct name_cipher_pair cipher_pairs[] = {
 	{ "aes-128", EVP_aes_128_cbc, },
 	{ "aes-256", EVP_aes_256_cbc, },
 	{ "des", EVP_des_cbc, },
 	{ "desx", EVP_desx_cbc, },
 	{ "rc4", EVP_rc4, },
+	{ NULL, NULL, },
 };
 
 const void *get_crypto_type(const char *name)
@@ -37,9 +33,9 @@ const void *get_crypto_type(const char *name)
 	const EVP_CIPHER *cipher = NULL;
 	int i;
 
-	for (i = 0; i < countof(cipher_pairs); i++) {
+	for (i = 0; cipher_pairs[i].name; i++) {
 		if (strcasecmp(cipher_pairs[i].name, name) == 0) {
-			cipher = cipher_pairs[i].cipher();
+			cipher = ((const EVP_CIPHER *(*)(void))cipher_pairs[i].cipher)();
 			break;
 		}
 	}
