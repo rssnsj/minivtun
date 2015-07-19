@@ -10,11 +10,125 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
+#include <openssl/evp.h>
+#include <openssl/md5.h>
 
 #include "library.h"
+
+struct name_cipher_pair cipher_pairs[] = {
+	{ "aes-128", EVP_aes_128_cbc, },
+	{ "aes-256", EVP_aes_256_cbc, },
+	{ "des", EVP_des_cbc, },
+	{ "desx", EVP_desx_cbc, },
+	{ "rc4", EVP_rc4, },
+	{ NULL, NULL, },
+};
+
+const void *get_crypto_type(const char *name)
+{
+	const EVP_CIPHER *cipher = NULL;
+	int i;
+
+	for (i = 0; cipher_pairs[i].name; i++) {
+		if (strcasecmp(cipher_pairs[i].name, name) == 0) {
+			cipher = ((const EVP_CIPHER *(*)(void))cipher_pairs[i].cipher)();
+			break;
+		}
+	}
+
+	if (cipher) {
+		assert(EVP_CIPHER_key_length(cipher) <= CRYPTO_MAX_KEY_SIZE);
+		assert(EVP_CIPHER_iv_length(cipher) <= CRYPTO_MAX_BLOCK_SIZE);
+		return cipher;
+	} else {
+		return NULL;
+	}
+}
+
+static const char crypto_ivec_initdata[CRYPTO_MAX_BLOCK_SIZE] = {
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+};
+
+#define CRYPTO_DATA_PADDING(data, dlen, bs) \
+	do { \
+		size_t last_len = *(dlen) % (bs); \
+		if (last_len) { \
+			size_t padding_len = bs - last_len; \
+			memset((char *)data + *(dlen), 0x0, padding_len); \
+			*(dlen) += padding_len; \
+		} \
+	} while(0)
+
+void datagram_encrypt(const void *key, const void *cptype, void *in,
+		void *out, size_t *dlen)
+{
+	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	EVP_CIPHER_CTX ctx;
+	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
+	int outl = 0, outl2 = 0;
+
+	if (iv_len == 0)
+		iv_len = 16;
+
+	memcpy(iv, crypto_ivec_initdata, iv_len);
+	CRYPTO_DATA_PADDING(in, dlen, iv_len);
+	EVP_CIPHER_CTX_init(&ctx);
+	assert(EVP_EncryptInit_ex(&ctx, cptype, NULL, key, iv));
+	EVP_CIPHER_CTX_set_padding(&ctx, 0);
+	assert(EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen));
+	assert(EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
+	EVP_CIPHER_CTX_cleanup(&ctx);
+
+	*dlen = (size_t)(outl + outl2);
+}
+
+void datagram_decrypt(const void *key, const void *cptype, void *in,
+		void *out, size_t *dlen)
+{
+	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	EVP_CIPHER_CTX ctx;
+	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
+	int outl = 0, outl2 = 0;
+
+	if (iv_len == 0)
+		iv_len = 16;
+
+	memcpy(iv, crypto_ivec_initdata, iv_len);
+	CRYPTO_DATA_PADDING(in, dlen, iv_len);
+	EVP_CIPHER_CTX_init(&ctx);
+	assert(EVP_DecryptInit_ex(&ctx, cptype, NULL, key, iv));
+	EVP_CIPHER_CTX_set_padding(&ctx, 0);
+	assert(EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen));
+	assert(EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
+	EVP_CIPHER_CTX_cleanup(&ctx);
+
+	*dlen = (size_t)(outl + outl2);
+}
+
+void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
+{
+	char *outp = out, *oute = outp + outlen;
+	MD5_CTX ctx;
+
+	MD5_Init(&ctx);
+	MD5_Update(&ctx, in, strlen(in));
+	MD5_Final(out, &ctx);
+
+	/* Fill in remaining buffer with repeated data. */
+	for (outp += 16; outp < oute; outp += 16) {
+		size_t bs = (oute - outp >= 16) ? 16 : (oute - outp);
+		memcpy(outp, out, bs);
+	}
+}
+
+/* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
 int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
 {

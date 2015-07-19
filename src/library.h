@@ -12,8 +12,6 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <openssl/aes.h>
-#include <openssl/md5.h>
 
 #define __be32 uint32_t
 #define __be16 uint16_t
@@ -24,6 +22,8 @@
 #define bool char
 #define true 1
 #define false 0
+
+#define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define container_of(ptr, type, member) ({			\
 	const typeof(((type *)0)->member) * __mptr = (ptr);	\
@@ -80,54 +80,22 @@
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-static inline void gen_string_md5sum(void *out, const char *in)
-{
-	MD5_CTX ctx;
-	MD5_Init(&ctx);
-	MD5_Update(&ctx, in, strlen(in));
-	MD5_Final(out, &ctx);
-}
+#define CRYPTO_DEFAULT_ALGORITHM  "aes-128"
+#define CRYPTO_MAX_KEY_SIZE  32
+#define CRYPTO_MAX_BLOCK_SIZE  32
 
-static inline void gen_encrypt_key(AES_KEY *key, const char *passwd)
-{
-	char md[16];
-	gen_string_md5sum(md, passwd);
-	AES_set_encrypt_key((void *)md, 128, key);
-}
+struct name_cipher_pair {
+	const char *name;
+	const void *cipher;
+};
 
-static inline void gen_decrypt_key(AES_KEY *key, const char *passwd)
-{
-	char md[16];
-	gen_string_md5sum(md, passwd);
-	AES_set_decrypt_key((void *)&md, 128, key);
-}
-
-#define AES_IVEC_INITVAL  { 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, \
-		0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, }
-
-static inline void bytes_encrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
-{
-	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
-	size_t remain = *dlen % AES_BLOCK_SIZE;
-	if (remain) {
-		size_t padding = AES_BLOCK_SIZE - remain;
-		memset((char *)in + *dlen, 0x0, padding);
-		*dlen += padding;
-	}
-	AES_cbc_encrypt(in, out, *dlen, key, (void *)ivec, AES_ENCRYPT);
-}
-
-static inline void bytes_decrypt(AES_KEY *key, const void *in, void *out, size_t *dlen)
-{
-	unsigned char ivec[AES_BLOCK_SIZE] = AES_IVEC_INITVAL;
-	size_t remain = *dlen % AES_BLOCK_SIZE;
-	if (remain) {
-		size_t padding = AES_BLOCK_SIZE - remain;
-		memset((char *)in + *dlen, 0x0, padding);
-		*dlen += padding;
-	}
-	AES_cbc_encrypt(in, out, *dlen, key, (void *)ivec, AES_DECRYPT);
-}
+extern struct name_cipher_pair cipher_pairs[];
+const void *get_crypto_type(const char *name);
+void datagram_encrypt(const void *key, const void *cptype, void *in,
+		void *out, size_t *dlen);
+void datagram_decrypt(const void *key, const void *cptype, void *in,
+		void *out, size_t *dlen);
+void fill_with_string_md5sum(const char *in, void *out, size_t outlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 

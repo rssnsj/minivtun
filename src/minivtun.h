@@ -22,9 +22,8 @@ struct minivtun_config {
 	bool wait_dns;
 	unsigned lfn_latency;
 
-	AES_KEY encrypt_key;
-	AES_KEY decrypt_key;
-	char crypto_passwd_md5sum[16];
+	char crypto_key[CRYPTO_MAX_KEY_SIZE];
+	const void *crypto_type;
 	struct in_addr local_tun_in;
 	struct in6_addr local_tun_in6;
 };
@@ -41,7 +40,7 @@ struct minivtun_msg {
 	struct {
 		__u8 opcode;
 		__u8 rsv[3];
-		__u8 passwd_md5sum[16];
+		__u8 auth_key[16];
 	}  __attribute__((packed)) hdr;
 
 	union {
@@ -62,20 +61,20 @@ struct minivtun_msg {
 
 #define enabled_encryption()  (config.crypto_passwd[0])
 
-static inline void local_to_netmsg(const void *in, void **out, size_t *dlen)
+static inline void local_to_netmsg(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		bytes_encrypt(&config.encrypt_key, in, *out, dlen);
+		datagram_encrypt(config.crypto_key, config.crypto_type, in, *out, dlen);
 	} else {
-		*out = (void *)in;
+		*out = in;
 	}
 }
-static inline void netmsg_to_local(const void *in, void **out, size_t *dlen)
+static inline void netmsg_to_local(void *in, void **out, size_t *dlen)
 {
 	if (enabled_encryption()) {
-		bytes_decrypt(&config.decrypt_key, in, *out, dlen);
+		datagram_decrypt(config.crypto_key, config.crypto_type, in, *out, dlen);
 	} else {
-		*out = (void *)in;
+		*out = in;
 	}
 }
 
