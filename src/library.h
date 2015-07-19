@@ -23,6 +23,8 @@
 #define true 1
 #define false 0
 
+#define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 #define container_of(ptr, type, member) ({			\
 	const typeof(((type *)0)->member) * __mptr = (ptr);	\
 	(type *)((char *)__mptr - offsetof(type, member)); })
@@ -78,15 +80,16 @@
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-#define CRYPTO_KEY_SIZE  16
-#define CRYPTO_BLOCK_SIZE  16
+#define CRYPTO_DEFAULT_ALGORITHM  "aes-128"
+#define CRYPTO_MAX_KEY_SIZE  32
+#define CRYPTO_MAX_BLOCK_SIZE  32
 
-void gen_string_md5sum(void *out, const char *in);
 const void *get_crypto_type(const char *name);
-void datagram_encrypt(const void *key, const void *crtype, void *in,
+void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen);
-void datagram_decrypt(const void *key, const void *crtype, void *in,
+void datagram_decrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen);
+void fill_with_string_md5sum(const char *in, void *out, size_t outlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 

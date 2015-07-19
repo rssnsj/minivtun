@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
@@ -18,26 +19,43 @@
 
 #include "library.h"
 
-void gen_string_md5sum(void *out, const char *in)
-{
-	MD5_CTX ctx;
-	MD5_Init(&ctx);
-	MD5_Update(&ctx, in, strlen(in));
-	MD5_Final(out, &ctx);
-}
+struct name_cipher_pair {
+	const char *name;
+	const EVP_CIPHER *(*cipher)(void);
+};
+
+static struct name_cipher_pair cipher_pairs[] = {
+	{ "aes-128", EVP_aes_128_cbc, },
+	{ "aes-256", EVP_aes_256_cbc, },
+	{ "des", EVP_des_cbc, },
+	{ "desx", EVP_desx_cbc, },
+	{ "rc4", EVP_rc4, },
+};
 
 const void *get_crypto_type(const char *name)
 {
-	if (strcasecmp(name, "aes") == 0) {
-		return EVP_aes_128_cbc();
-	} else if (strcasecmp(name, "rc4") == 0) {
-		return EVP_rc4();
+	const EVP_CIPHER *cipher = NULL;
+	int i;
+
+	for (i = 0; i < countof(cipher_pairs); i++) {
+		if (strcasecmp(cipher_pairs[i].name, name) == 0) {
+			cipher = cipher_pairs[i].cipher();
+			break;
+		}
+	}
+
+	if (cipher) {
+		assert(EVP_CIPHER_key_length(cipher) <= CRYPTO_MAX_KEY_SIZE);
+		assert(EVP_CIPHER_iv_length(cipher) <= CRYPTO_MAX_BLOCK_SIZE);
+		return cipher;
 	} else {
 		return NULL;
 	}
 }
 
-static const char crypto_ivec_initval[CRYPTO_BLOCK_SIZE] = {
+static const char crypto_ivec_initdata[CRYPTO_MAX_BLOCK_SIZE] = {
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
+	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
 	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
 	0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90,
 };
@@ -52,44 +70,66 @@ static const char crypto_ivec_initval[CRYPTO_BLOCK_SIZE] = {
 		} \
 	} while(0)
 
-void datagram_encrypt(const void *key, const void *crtype, void *in,
+void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	unsigned char ivec[CRYPTO_BLOCK_SIZE];
+	size_t iv_len = EVP_CIPHER_iv_length(cptype);
 	EVP_CIPHER_CTX ctx;
+	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
 
-	memcpy(ivec, crypto_ivec_initval, CRYPTO_BLOCK_SIZE);
-	CRYPTO_DATA_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
+	if (iv_len == 0)
+		iv_len = 16;
 
+	memcpy(iv, crypto_ivec_initdata, iv_len);
+	CRYPTO_DATA_PADDING(in, dlen, iv_len);
 	EVP_CIPHER_CTX_init(&ctx);
-	EVP_EncryptInit_ex(&ctx, crtype, NULL, key, ivec);
+	assert(EVP_EncryptInit_ex(&ctx, cptype, NULL, key, iv));
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen);
-	EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
+	assert(EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen));
+	assert(EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
 	EVP_CIPHER_CTX_cleanup(&ctx);
 
 	*dlen = (size_t)(outl + outl2);
 }
 
-void datagram_decrypt(const void *key, const void *crtype, void *in,
+void datagram_decrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	unsigned char ivec[CRYPTO_BLOCK_SIZE];
+	size_t iv_len = EVP_CIPHER_iv_length(cptype);
 	EVP_CIPHER_CTX ctx;
+	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
 
-	memcpy(ivec, crypto_ivec_initval, CRYPTO_BLOCK_SIZE);
-	CRYPTO_DATA_PADDING(in, dlen, CRYPTO_BLOCK_SIZE);
+	if (iv_len == 0)
+		iv_len = 16;
 
+	memcpy(iv, crypto_ivec_initdata, iv_len);
+	CRYPTO_DATA_PADDING(in, dlen, iv_len);
 	EVP_CIPHER_CTX_init(&ctx);
-	EVP_DecryptInit_ex(&ctx, crtype, NULL, key, ivec);
+	assert(EVP_DecryptInit_ex(&ctx, cptype, NULL, key, iv));
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen);
-	EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2);
+	assert(EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen));
+	assert(EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
 	EVP_CIPHER_CTX_cleanup(&ctx);
 
 	*dlen = (size_t)(outl + outl2);
+}
+
+void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
+{
+	char *outp = out, *oute = outp + outlen;
+	MD5_CTX ctx;
+
+	MD5_Init(&ctx);
+	MD5_Update(&ctx, in, strlen(in));
+	MD5_Final(out, &ctx);
+
+	/* Fill in remaining buffer with repeated data. */
+	for (outp += 16; outp < oute; outp += 16) {
+		size_t bs = (oute - outp >= 16) ? 16 : (oute - outp);
+		memcpy(outp, out, bs);
+	}
 }
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */

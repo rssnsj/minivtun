@@ -153,7 +153,7 @@ int main(int argc, char *argv[])
 {
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
-	const char *crypto_type = "aes";
+	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
 	char cmd[128];
 	int tunfd, opt;
 
@@ -306,13 +306,13 @@ int main(int argc, char *argv[])
 	(void)system(cmd);
 
 	if (enabled_encryption()) {
-		gen_string_md5sum(config.crypto_key, config.crypto_passwd);
+		fill_with_string_md5sum(config.crypto_passwd, config.crypto_key, CRYPTO_MAX_KEY_SIZE);
 		if ((config.crypto_type = get_crypto_type(crypto_type)) == NULL) {
 			fprintf(stderr, "*** No such encryption type defined: %s.\n", crypto_type);
 			exit(1);
 		}
 	} else {
-		memset(config.crypto_key, 0x0, CRYPTO_KEY_SIZE);
+		memset(config.crypto_key, 0x0, CRYPTO_MAX_KEY_SIZE);
 		fprintf(stderr, "*** WARNING: Transmission will not be encrypted.\n");
 	}
 

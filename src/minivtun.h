@@ -21,7 +21,7 @@ struct minivtun_config {
 	bool in_background;
 	bool wait_dns;
 
-	char crypto_key[CRYPTO_KEY_SIZE];
+	char crypto_key[CRYPTO_MAX_KEY_SIZE];
 	const void *crypto_type;
 	struct in_addr local_tun_in;
 	struct in6_addr local_tun_in6;
@@ -39,7 +39,7 @@ struct minivtun_msg {
 	struct {
 		__u8 opcode;
 		__u8 rsv[3];
-		__u8 auth_key[CRYPTO_KEY_SIZE];
+		__u8 auth_key[16];
 	}  __attribute__((packed)) hdr;
 
 	union {

@@ -50,7 +50,8 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
  
 	/* Verify password. */
-	if (memcmp(nmsg->hdr.auth_key, config.crypto_key, CRYPTO_KEY_SIZE) != 0)
+	if (memcmp(nmsg->hdr.auth_key, config.crypto_key, 
+		sizeof(nmsg->hdr.auth_key)) != 0)
 		return 0;
 
 	last_recv = current_ts;
@@ -121,7 +122,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
 	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
-	memcpy(nmsg.hdr.auth_key, config.crypto_key, CRYPTO_KEY_SIZE);
+	memcpy(nmsg.hdr.auth_key, config.crypto_key, sizeof(nmsg.hdr.auth_key));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
 	memcpy(nmsg.ipdata.data, pi + 1, ip_dlen);
@@ -153,7 +154,7 @@ static int peer_keepalive(int sockfd)
 
 	nmsg->hdr.opcode = MINIVTUN_MSG_KEEPALIVE;
 	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
-	memcpy(nmsg->hdr.auth_key, config.crypto_key, CRYPTO_KEY_SIZE);
+	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
 	nmsg->keepalive.loc_tun_in = config.local_tun_in;
 	nmsg->keepalive.loc_tun_in6 = config.local_tun_in6;
 
