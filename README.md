@@ -35,22 +35,25 @@ Compile and install
 
 ### Usage
 
-    Mini virtual tunneller in non-standard protocol.
-    Usage:
-      minivtun [options]
-    Options:
-      -l <ip:port>          IP:port of local binding
-      -r <ip:port>          IP:port of peer device
-      -a <tun_lip/tun_rip>  tunnel IP pair
-      -A <tun_ip6/pfx_len>  tunnel IPv6 address/prefix length pair
-      -m <mtu>              set MTU size, default: 1408.
-      -t <keepalive_timeo>  seconds between sending keep-alive packets, default: 13
-      -n <ifname>           tunnel interface name
-      -p <pid_file>         PID file of the daemon
-      -e <encrypt_key>      shared password for data encryption
-      -N                    turn off encryption for tunnelling data
-      -d                    run as daemon process
-      -h                    print this help
+	Mini virtual tunneller in non-standard protocol.
+	Usage:
+	  minivtun [options]
+	Options:
+	  -l, --local <ip:port>               IP:port for server to listen
+	  -r, --remote <ip:port>              IP:port of server to connect
+	  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface
+					  <tun_lip/pfx_len>   IPv4 address/prefix length pair
+	  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair
+	  -m, --mtu <mtu>                     set MTU size, default: 1416.
+	  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: 13
+	  -n, --ifname <ifname>               virtual interface name
+	  -p, --pidfile <pid_file>            PID file of the daemon
+	  -e, --key <encryption_key>          shared password for data encryption
+	  -v, --route <network/prefix=gateway>
+	                                      route a network to a client address, can be multiple
+	  -w, --wait-dns                      wait for DNS resolve ready after service started.
+	  -d, --daemon                        run as daemon process
+	  -h, --help                          print this help
 
 ### Examples
 
@@ -71,6 +74,4 @@ Multiple clients on different devices can be connected to the same server:
 
 ### Diagnoses
 
-If you run 'minivtun' server on a VPS (openvz, kvm, docker, ...), I recommend you to enlarge the server side MTU, e.g., 4000. This is because the physical host might enables segmentation offloadings which let your VPS receive large TCP packets (up to 3000 bytes). Since the feature is opened on the physical host, you cannot disable it. So the best way is to change your MTU by adding `-m size`:
-
-    /usr/sbin/minivtun -l 0.0.0.0:1414 -a 10.7.0.1/24 -e Hello -d -m 4000
+None.
