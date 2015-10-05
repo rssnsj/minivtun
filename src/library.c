@@ -130,7 +130,7 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
+int addrpair_to_sockaddr(const char *pair, struct sockaddr_in *addr)
 {
 	char host[64], *portp;
 	struct addrinfo hints, *result;
@@ -147,7 +147,7 @@ int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
 	strncpy(host, pair, sizeof(host));
 	host[sizeof(host) - 1] = '\0';
 
-	if (!(portp = strchr(host, sep)))
+	if (!(portp = strchr(host, ':')))
 		return -EINVAL;
 	*(portp++) = '\0';
 

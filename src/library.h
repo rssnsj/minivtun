@@ -139,7 +139,7 @@ static inline void hexdump(void *d, size_t len)
 	printf("\n");
 }
 
-int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr);
+int addrpair_to_sockaddr(const char *pair, struct sockaddr_in *addr);
 int do_daemonize(void);
 
 #endif /* __LIBRARY_H */

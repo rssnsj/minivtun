@@ -180,7 +180,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	fd_set rset;
 	char s_peer_addr[44];
 
-	if ((rc = v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr)) == 0) {
+	if ((rc = addrpair_to_sockaddr(peer_addr_pair, &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
 		inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
@@ -251,7 +251,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			while (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
+			while (addrpair_to_sockaddr(peer_addr_pair, &peer_addr) < 0) {
 				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
 					peer_addr_pair);
 				sleep(5);
