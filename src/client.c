@@ -21,7 +21,6 @@
 #include "minivtun.h"
 
 static time_t last_recv = 0, last_keepalive = 0, current_ts = 0;
-static struct sockaddr_v4v6 peer_addr;
 
 static int network_receiving(int tunfd, int sockfd)
 {
@@ -132,8 +131,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = sendto(sockfd, out_data, out_dlen, 0, (struct sockaddr *)&peer_addr,
-				sizeof_sockaddr(&peer_addr));
+	rc = send(sockfd, out_data, out_dlen, 0);
 	/**
 	 * NOTICE: Don't update this on each tunnel packet
 	 * transmit. We always need to keep the local virtual IP
@@ -162,8 +160,7 @@ static int peer_keepalive(int sockfd)
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
-	rc = sendto(sockfd, out_msg, out_len, 0, (struct sockaddr *)&peer_addr,
-				sizeof_sockaddr(&peer_addr));
+	rc = send(sockfd, out_msg, out_len, 0);
 
 	/* Update 'last_keepalive' only when it's really sent out. */
 	if (rc > 0) {
@@ -179,6 +176,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	int sockfd, rc;
 	fd_set rset;
 	char s_peer_addr[50];
+	struct sockaddr_v4v6 peer_addr;
 
 	if ((rc = get_sockaddr_v4v6_pair(peer_addr_pair, &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
@@ -205,6 +203,10 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	/* The initial tunnelling connection. */
 	if ((sockfd = socket(peer_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		exit(1);
+	}
+	if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
+		fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
 		exit(1);
 	}
 	set_nonblock(sockfd);
@@ -258,10 +260,15 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 			/* Reconnected OK. Reopen the socket for a different local port. */
 			close(sockfd);
-			if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+			if ((sockfd = socket(peer_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 				exit(1);
 			}
+			if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
+				fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
+				exit(1);
+			}
+			set_nonblock(sockfd);
 
 			last_keepalive = 0;
 			last_recv = current_ts;
