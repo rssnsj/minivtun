@@ -630,7 +630,7 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	time_t last_walk;
 	char s_loc_addr[44];
 
-	if (addrpair_to_sockaddr(loc_addr_pair, &loc_addr) < 0) {
+	if (get_sockaddr_v4v6_pair(loc_addr_pair, &loc_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
 	}

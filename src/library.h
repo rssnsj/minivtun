@@ -36,6 +36,19 @@
 	#define ETH_P_IPV6 0x86dd /* IPv6 over bluebook */
 #endif
 
+struct sockaddr_v4v6 {
+	union {
+		sa_family_t sa_family;
+		struct sockaddr_in in;
+		struct sockaddr_in6 in6;
+	};
+};
+#define port_of_sockaddr(s) ((s)->sa_family == AF_INET6 ? (s)->in6.sin6_port : (s)->in.sin_port)
+#define addr_of_sockaddr(s) ((s)->sa_family == AF_INET6 ? (void *)&(s)->in6.sin6_addr : (void *)&(s)->in.sin_addr)
+#define sizeof_sockaddr(s)  ((s)->sa_family == AF_INET6 ? sizeof((s)->in6) : sizeof((s)->in))
+
+int get_sockaddr_v4v6_pair(const char *pair, void *addr);
+
 #ifdef __APPLE__
 	#include <net/if.h>
 
@@ -139,7 +152,6 @@ static inline void hexdump(void *d, size_t len)
 	printf("\n");
 }
 
-int addrpair_to_sockaddr(const char *pair, struct sockaddr_in *addr);
 int do_daemonize(void);
 
 #endif /* __LIBRARY_H */

@@ -21,7 +21,7 @@
 #include "minivtun.h"
 
 static time_t last_recv = 0, last_keepalive = 0, current_ts = 0;
-static struct sockaddr_in peer_addr;
+static struct sockaddr_v4v6 peer_addr;
 
 static int network_receiving(int tunfd, int sockfd)
 {
@@ -132,8 +132,8 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = sendto(sockfd, out_data, out_dlen, 0,
-		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	rc = sendto(sockfd, out_data, out_dlen, 0, (struct sockaddr *)&peer_addr,
+				sizeof_sockaddr(&peer_addr));
 	/**
 	 * NOTICE: Don't update this on each tunnel packet
 	 * transmit. We always need to keep the local virtual IP
@@ -162,8 +162,8 @@ static int peer_keepalive(int sockfd)
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
-	rc = sendto(sockfd, out_msg, out_len, 0,
-		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	rc = sendto(sockfd, out_msg, out_len, 0, (struct sockaddr *)&peer_addr,
+				sizeof_sockaddr(&peer_addr));
 
 	/* Update 'last_keepalive' only when it's really sent out. */
 	if (rc > 0) {
@@ -178,21 +178,21 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	struct timeval timeo;
 	int sockfd, rc;
 	fd_set rset;
-	char s_peer_addr[44];
+	char s_peer_addr[50];
 
-	if ((rc = addrpair_to_sockaddr(peer_addr_pair, &peer_addr)) == 0) {
+	if ((rc = get_sockaddr_v4v6_pair(peer_addr_pair, &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
-		inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
-			s_peer_addr, sizeof(s_peer_addr));
+		inet_ntop(peer_addr.sa_family, addr_of_sockaddr(&peer_addr),
+				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
-			s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
+				s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)), config.devname);
 	} else if (rc == -EAGAIN && config.wait_dns) {
 		/* Resolve later (last_recv = 0). */
 		last_recv = 0;
 		printf("Mini virtual tunnelling client, interface: %s. \n", config.devname);
 		printf("WARNING: DNS resolution of '%s' temporarily unavailable, "
-			"resolving later.\n", peer_addr_pair);
+			   "resolving later.\n", peer_addr_pair);
 	} else if (rc == -EINVAL) {
 		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
 		return -1;
@@ -203,7 +203,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 
 	/* The initial tunnelling connection. */
-	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -251,9 +251,8 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			while (addrpair_to_sockaddr(peer_addr_pair, &peer_addr) < 0) {
-				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
-					peer_addr_pair);
+			while (get_sockaddr_v4v6_pair(peer_addr_pair, &peer_addr) < 0) {
+				fprintf(stderr, "Failed to resolve '%s', retrying.\n", peer_addr_pair);
 				sleep(5);
 			}
 
@@ -267,9 +266,9 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			last_keepalive = 0;
 			last_recv = current_ts;
 
-			inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
-				s_peer_addr, sizeof(s_peer_addr));
-			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(peer_addr.sin_port));
+			inet_ntop(peer_addr.sa_family, addr_of_sockaddr(&peer_addr), s_peer_addr,
+					  sizeof(s_peer_addr));
+			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)));
 			continue;
 		}
 

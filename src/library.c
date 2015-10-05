@@ -130,40 +130,43 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int addrpair_to_sockaddr(const char *pair, struct sockaddr_in *addr)
+int get_sockaddr_v4v6_pair(const char *pair, void *addr)
 {
-	char host[64], *portp;
 	struct addrinfo hints, *result;
-	int rc;
+	char host[51] = "", s_port[10] = "";
+	int port = 0, rc;
 
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
-		addr->sin_family = AF_INET;
-		addr->sin_addr.s_addr = 0;
-		addr->sin_port = 0;
+		struct sockaddr_in *sa4 = addr;
+		sa4->sin_family = AF_UNSPEC;
+		sa4->sin_addr.s_addr = 0;
+		sa4->sin_port = 0;
 		return 0;
 	}
 
-	strncpy(host, pair, sizeof(host));
-	host[sizeof(host) - 1] = '\0';
-
-	if (!(portp = strchr(host, ':')))
+	if (sscanf(pair, "[%50[^]]]:%d", host, &port) == 2) {
+	} else if (sscanf(pair, "%50[^:]:%d", host, &port) == 2) {
+	} else {
 		return -EINVAL;
-	*(portp++) = '\0';
+	}
+	sprintf(s_port, "%d", port);
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;    /* Allow IPv4 or IPv6 */
+	hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;  /* For wildcard IP address */
 	hints.ai_protocol = 0;        /* Any protocol */
 	hints.ai_canonname = NULL;
 	hints.ai_addr = NULL;
 	hints.ai_next = NULL;
-	if ((rc = getaddrinfo(host, portp, &hints, &result)))
+
+	if ((rc = getaddrinfo(host, s_port, &hints, &result)))
 		return -EAGAIN;
 
 	/* Get the first resolution. */
-	*addr = *(struct sockaddr_in *)result->ai_addr;
+	memcpy(addr, result->ai_addr, result->ai_addrlen);
+
 	freeaddrinfo(result);
 	return 0;
 }
