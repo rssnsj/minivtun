@@ -84,7 +84,7 @@ static struct in_addr *vt_route_lookup(const struct in_addr *addr)
 
 struct ra_entry {
 	struct list_head list;
-	struct sockaddr_in real_addr;
+	struct sockaddr_v4v6 real_addr;
 	time_t last_recv;
 	time_t last_xmit;
 	int refs;
@@ -96,22 +96,26 @@ struct ra_entry {
 static struct list_head ra_set_hbase[RA_SET_HASH_SIZE];
 static unsigned ra_set_len;
 
-static inline uint32_t real_addr_hash(const struct sockaddr_in *in)
+static inline uint32_t real_addr_hash(const struct sockaddr_v4v6 *sa)
 {
-	return jhash_2words(in->sin_family, in->sin_addr.s_addr, hash_initval);
+	if (sa->sa_family == AF_INET6) {
+		return jhash_2words(sa->sa_family, sa->in6.sin6_port,
+			jhash2((uint32_t *)&sa->in6.sin6_addr, 4, hash_initval));
+	} else {
+		return jhash_3words(sa->sa_family, sa->in.sin_port,
+			sa->in.sin_addr.s_addr, hash_initval);
+	}
 }
 
-static struct ra_entry *ra_get_or_create(const struct sockaddr_in *in)
+static struct ra_entry *ra_get_or_create(const struct sockaddr_v4v6 *sa)
 {
 	struct list_head *chain = &ra_set_hbase[
-		real_addr_hash(in) & (RA_SET_HASH_SIZE - 1)];
+		real_addr_hash(sa) & (RA_SET_HASH_SIZE - 1)];
 	struct ra_entry *re;
-	char s_real_addr[44];
+	char s_real_addr[50];
 
 	list_for_each_entry (re, chain, list) {
-		if (re->real_addr.sin_family == in->sin_family &&
-			re->real_addr.sin_addr.s_addr == in->sin_addr.s_addr &&
-			re->real_addr.sin_port == in->sin_port) {
+		if (is_sockaddr_equal(&re->real_addr, sa)) {
 			re->refs++;
 			return re;
 		}
@@ -123,14 +127,14 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_in *in)
 		return NULL;
 	}
 
-	re->real_addr = *in;
+	re->real_addr = *sa;
 	re->refs = 1;
 	list_add_tail(&re->list, chain);
 	ra_set_len++;
 
-	inet_ntop(re->real_addr.sin_family, &re->real_addr.sin_addr,
-		s_real_addr, sizeof(s_real_addr));
-	printf("New client [%s:%u]\n", s_real_addr, ntohs(re->real_addr.sin_port));
+	inet_ntop(re->real_addr.sa_family, addr_of_sockaddr(&re->real_addr),
+			  s_real_addr, sizeof(s_real_addr));
+	printf("New client [%s:%u]\n", s_real_addr, port_of_sockaddr(&re->real_addr));
 
 	return re;
 }
@@ -143,15 +147,15 @@ static inline void ra_put_no_free(struct ra_entry *re)
 
 static inline void ra_entry_release(struct ra_entry *re)
 {
-	char s_real_addr[44];
+	char s_real_addr[50];
 
 	assert(re->refs == 0);
 	list_del(&re->list);
 	ra_set_len--;
 
-	inet_ntop(re->real_addr.sin_family, &re->real_addr.sin_addr,
-		s_real_addr, sizeof(s_real_addr));
-	printf("Recycled client [%s:%u]\n", s_real_addr, ntohs(re->real_addr.sin_port));
+	inet_ntop(re->real_addr.sa_family, addr_of_sockaddr(&re->real_addr),
+			  s_real_addr, sizeof(s_real_addr));
+	printf("Recycled client [%s:%u]\n", s_real_addr, ntohs(port_of_sockaddr(&re->real_addr)));
 
 	free(re);
 }
@@ -228,29 +232,31 @@ static inline int tun_addr_comp(
 	}
 }
 
+#if 0
 static inline void tun_client_dump(struct tun_client *ce)
 {
-	char s_virt_addr[44] = "", s_real_addr[44] = "";
+	char s_virt_addr[50] = "", s_real_addr[50] = "";
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in,
-		s_virt_addr, sizeof(s_virt_addr));
-	inet_ntop(ce->ra->real_addr.sin_family, &ce->ra->real_addr.sin_addr,
-		s_real_addr, sizeof(s_real_addr));
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
+			  sizeof(s_virt_addr));
+	inet_ntop(ce->ra->real_addr.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
+			  s_real_addr, sizeof(s_real_addr));
 	printf("[%s] (%s:%u), last_recv: %lu, last_xmit: %lu\n", s_virt_addr,
-		s_real_addr, ntohs(ce->ra->real_addr.sin_port),
-		(unsigned long)ce->last_recv, (unsigned long)ce->last_xmit);
+			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)),
+			(unsigned long)ce->last_recv, (unsigned long)ce->last_xmit);
 }
+#endif
 
 static inline void tun_client_release(struct tun_client *ce)
 {
-	char s_virt_addr[44], s_real_addr[44];
+	char s_virt_addr[50], s_real_addr[50];
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in,
-		s_virt_addr, sizeof(s_virt_addr));
-	inet_ntop(ce->ra->real_addr.sin_family, &ce->ra->real_addr.sin_addr,
-		s_real_addr, sizeof(s_real_addr));
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
+			  sizeof(s_virt_addr));
+	inet_ntop(ce->ra->real_addr.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
+			  s_real_addr, sizeof(s_real_addr));
 	printf("Recycled virtual address [%s] at [%s:%u].\n", s_virt_addr, s_real_addr,
-		ntohs(ce->ra->real_addr.sin_port));
+			ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	ra_put_no_free(ce->ra);
 
@@ -274,18 +280,16 @@ static struct tun_client *tun_client_try_get(const struct tun_addr *vaddr)
 }
 
 static struct tun_client *tun_client_get_or_create(
-		const struct tun_addr *vaddr, const struct sockaddr_in *raddr)
+		const struct tun_addr *vaddr, const struct sockaddr_v4v6 *raddr)
 {
 	struct list_head *chain = &va_map_hbase[
 		tun_addr_hash(vaddr) & (VA_MAP_HASH_SIZE - 1)];
 	struct tun_client *ce, *__ce;
-	char s_virt_addr[44], s_real_addr[44];
+	char s_virt_addr[50], s_real_addr[50];
 
 	list_for_each_entry_safe (ce, __ce, chain, list) {
 		if (tun_addr_comp(&ce->virt_addr, vaddr) == 0) {
-			if (ce->ra->real_addr.sin_family != raddr->sin_family ||
-				ce->ra->real_addr.sin_addr.s_addr != raddr->sin_addr.s_addr ||
-				ce->ra->real_addr.sin_port != raddr->sin_port) {
+			if (is_sockaddr_equal(&ce->ra->real_addr, raddr)) {
 				/* Real address changed, get a new entry for that. */
 				ra_put_no_free(ce->ra);
 				if ((ce->ra = ra_get_or_create(raddr)) == NULL) {
@@ -314,12 +318,12 @@ static struct tun_client *tun_client_get_or_create(
 	list_add_tail(&ce->list, chain);
 	va_map_len++;
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in,
-		s_virt_addr, sizeof(s_virt_addr));
-	inet_ntop(ce->ra->real_addr.sin_family, &ce->ra->real_addr.sin_addr,
-		s_real_addr, sizeof(s_real_addr));
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
+			  sizeof(s_virt_addr));
+	inet_ntop(ce->ra->real_addr.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
+			  s_real_addr, sizeof(s_real_addr));
 	printf("New virtual address [%s] at [%s:%u].\n", s_virt_addr, s_real_addr,
-		ntohs(ce->ra->real_addr.sin_port));
+			ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	return ce;
 }
@@ -346,8 +350,8 @@ static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
-	rc = sendto(sockfd, out_msg, out_len, 0,
-		(struct sockaddr *)&re->real_addr, sizeof(re->real_addr));
+	rc = sendto(sockfd, out_msg, out_len, 0, (struct sockaddr *)&re->real_addr,
+				sizeof_sockaddr(&re->real_addr));
 
 	/* Update 'last_xmit' only when it's really sent out. */
 	if (rc > 0) {
@@ -376,7 +380,6 @@ static void va_ra_walk_continue(int sockfd)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
-				(void)tun_client_dump;
 				if (current_ts - ce->last_recv > config.reconnect_timeo) {
 					tun_client_release(ce);
 				}
@@ -450,7 +453,7 @@ static int network_receiving(int tunfd, int sockfd)
 	struct tun_addr virt_addr;
 	struct tun_client *ce;
 	struct ra_entry *re;
-	struct sockaddr_in real_peer;
+	struct sockaddr_v4v6 real_peer;
 	socklen_t real_peer_alen;
 	struct iovec iov[2];
 	int rc;
@@ -614,7 +617,8 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
 	rc = sendto(sockfd, out_data, out_dlen, 0,
-		(struct sockaddr *)&ce->ra->real_addr, sizeof(ce->ra->real_addr));
+				(struct sockaddr *)&ce->ra->real_addr,
+				sizeof_sockaddr(&ce->ra->real_addr));
 	ce->last_xmit = current_ts;
 	ce->ra->last_xmit = current_ts;
 
@@ -625,30 +629,30 @@ int run_server(int tunfd, const char *loc_addr_pair)
 {
 	struct timeval timeo;
 	int sockfd, rc;
-	struct sockaddr_in loc_addr;
+	struct sockaddr_v4v6 loc_addr;
 	fd_set rset;
 	time_t last_walk;
-	char s_loc_addr[44];
+	char s_loc_addr[50];
 
 	if (get_sockaddr_v4v6_pair(loc_addr_pair, &loc_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
 	}
 
-	inet_ntop(loc_addr.sin_family, &loc_addr.sin_addr,
-		s_loc_addr, sizeof(s_loc_addr));
+	inet_ntop(loc_addr.sa_family, addr_of_sockaddr(&loc_addr), s_loc_addr,
+			  sizeof(s_loc_addr));
 	printf("Mini virtual tunnelling server on %s:%u, interface: %s.\n",
-		s_loc_addr, ntohs(loc_addr.sin_port), config.devname);
+			s_loc_addr, ntohs(port_of_sockaddr(&loc_addr)), config.devname);
 
 	/* Initialize address map hash table. */
 	init_va_ra_maps();
 	hash_initval = (uint32_t)time(NULL);
 
-	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+	if ((sockfd = socket(loc_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
-	if (bind(sockfd, (struct sockaddr *)&loc_addr, sizeof(loc_addr)) < 0) {
+	if (bind(sockfd, (struct sockaddr *)&loc_addr, sizeof_sockaddr(&loc_addr)) < 0) {
 		fprintf(stderr, "*** bind() failed: %s.\n", strerror(errno));
 		exit(1);
 	}

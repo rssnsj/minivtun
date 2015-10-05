@@ -203,7 +203,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 
 	/* The initial tunnelling connection. */
-	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+	if ((sockfd = socket(peer_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 		exit(1);
 	}

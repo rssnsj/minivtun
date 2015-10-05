@@ -130,7 +130,7 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int get_sockaddr_v4v6_pair(const char *pair, void *addr)
+int get_sockaddr_v4v6_pair(const char *pair, struct sockaddr_v4v6 *sa)
 {
 	struct addrinfo hints, *result;
 	char host[51] = "", s_port[10] = "";
@@ -138,7 +138,7 @@ int get_sockaddr_v4v6_pair(const char *pair, void *addr)
 
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
-		struct sockaddr_in *sa4 = addr;
+		struct sockaddr_in *sa4 = (struct sockaddr_in *)sa;
 		sa4->sin_family = AF_UNSPEC;
 		sa4->sin_addr.s_addr = 0;
 		sa4->sin_port = 0;
@@ -147,6 +147,8 @@ int get_sockaddr_v4v6_pair(const char *pair, void *addr)
 
 	if (sscanf(pair, "[%50[^]]]:%d", host, &port) == 2) {
 	} else if (sscanf(pair, "%50[^:]:%d", host, &port) == 2) {
+	} else if (sscanf(pair, "%d", &port) == 1) {
+		strcpy(host, "0.0.0.0");
 	} else {
 		return -EINVAL;
 	}
@@ -165,7 +167,7 @@ int get_sockaddr_v4v6_pair(const char *pair, void *addr)
 		return -EAGAIN;
 
 	/* Get the first resolution. */
-	memcpy(addr, result->ai_addr, result->ai_addrlen);
+	memcpy(sa, result->ai_addr, result->ai_addrlen);
 
 	freeaddrinfo(result);
 	return 0;
