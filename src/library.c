@@ -139,7 +139,7 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
 		struct sockaddr_in *sa4 = (struct sockaddr_in *)sa;
-		sa4->sin_family = AF_UNSPEC;
+		sa4->sin_family = AF_INET;
 		sa4->sin_addr.s_addr = 0;
 		sa4->sin_port = 0;
 		return 0;

@@ -51,23 +51,23 @@ static inline bool is_in6_equal(const struct in6_addr *a1, const struct in6_addr
 
 struct sockaddr_inx {
 	union {
-		sa_family_t sa_family;
+		struct sockaddr sa;
 		struct sockaddr_in in;
 		struct sockaddr_in6 in6;
 	};
 };
 
-#define port_of_sockaddr(s) ((s)->sa_family == AF_INET6 ? (s)->in6.sin6_port : (s)->in.sin_port)
-#define addr_of_sockaddr(s) ((s)->sa_family == AF_INET6 ? (void *)&(s)->in6.sin6_addr : (void *)&(s)->in.sin_addr)
-#define sizeof_sockaddr(s)  ((s)->sa_family == AF_INET6 ? sizeof((s)->in6) : sizeof((s)->in))
+#define port_of_sockaddr(s) ((s)->sa.sa_family == AF_INET6 ? (s)->in6.sin6_port : (s)->in.sin_port)
+#define addr_of_sockaddr(s) ((s)->sa.sa_family == AF_INET6 ? (void *)&(s)->in6.sin6_addr : (void *)&(s)->in.sin_addr)
+#define sizeof_sockaddr(s)  ((s)->sa.sa_family == AF_INET6 ? sizeof((s)->in6) : sizeof((s)->in))
 
 static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 		const struct  sockaddr_inx *a2)
 {
-	if (a1->sa_family != a2->sa_family)
+	if (a1->sa.sa_family != a2->sa.sa_family)
 		return false;
 
-	if (a1->sa_family == AF_INET6) {
+	if (a1->sa.sa_family == AF_INET6) {
 		if (a1->in.sin_addr.s_addr == a2->in.sin_addr.s_addr &&
 			a1->in.sin_port == a1->in.sin_port) {
 			return true;

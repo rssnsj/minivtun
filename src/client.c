@@ -181,7 +181,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
-		inet_ntop(peer_addr.sa_family, addr_of_sockaddr(&peer_addr),
+		inet_ntop(peer_addr.sa.sa_family, addr_of_sockaddr(&peer_addr),
 				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)), config.devname);
@@ -201,7 +201,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 
 	/* The initial tunnelling connection. */
-	if ((sockfd = socket(peer_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+	if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -260,7 +260,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 			/* Reconnected OK. Reopen the socket for a different local port. */
 			close(sockfd);
-			if ((sockfd = socket(peer_addr.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+			if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 				exit(1);
 			}
@@ -273,7 +273,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			last_keepalive = 0;
 			last_recv = current_ts;
 
-			inet_ntop(peer_addr.sa_family, addr_of_sockaddr(&peer_addr), s_peer_addr,
+			inet_ntop(peer_addr.sa.sa_family, addr_of_sockaddr(&peer_addr), s_peer_addr,
 					  sizeof(s_peer_addr));
 			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)));
 			continue;
