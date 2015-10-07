@@ -173,7 +173,7 @@ static int peer_keepalive(int sockfd)
 int run_client(int tunfd, const char *peer_addr_pair)
 {
 	struct timeval timeo;
-	int sockfd, rc;
+	int sockfd = -1, rc;
 	fd_set rset;
 	char s_peer_addr[50];
 	struct sockaddr_inx peer_addr;
@@ -185,6 +185,17 @@ int run_client(int tunfd, const char *peer_addr_pair)
 				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)), config.devname);
+
+		/* The initial connection. */
+		if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+			fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+			exit(1);
+		}
+		if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
+			fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
+			exit(1);
+		}
+		set_nonblock(sockfd);
 	} else if (rc == -EAGAIN && config.wait_dns) {
 		/* Resolve later (last_recv = 0). */
 		last_recv = 0;
@@ -199,17 +210,6 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		return -1;
 	}
 
-
-	/* The initial tunnelling connection. */
-	if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-		exit(1);
-	}
-	if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
-		fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
-		exit(1);
-	}
-	set_nonblock(sockfd);
 
 	/* Run in background. */
 	if (config.in_background)
@@ -229,7 +229,8 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(tunfd, &rset);
-		FD_SET(sockfd, &rset);
+		if (sockfd >= 0)
+			FD_SET(sockfd, &rset);
 
 		timeo.tv_sec = 2;
 		timeo.tv_usec = 0;
@@ -248,7 +249,8 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Packet transmission timed out, send keep-alive packet. */
 		if (current_ts - last_keepalive > config.keepalive_timeo) {
-			peer_keepalive(sockfd);
+			if (sockfd >= 0)
+				peer_keepalive(sockfd);
 		}
 
 		/* Connection timed out, try reconnecting. */
@@ -259,7 +261,8 @@ int run_client(int tunfd, const char *peer_addr_pair)
 			}
 
 			/* Reconnected OK. Reopen the socket for a different local port. */
-			close(sockfd);
+			if (sockfd >= 0)
+				close(sockfd);
 			if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 				exit(1);
@@ -283,7 +286,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		if (rc == 0)
 			continue;
 
-		if (FD_ISSET(sockfd, &rset)) {
+		if (sockfd >= 0 && FD_ISSET(sockfd, &rset)) {
 			rc = network_receiving(tunfd, sockfd);
 		}
 
