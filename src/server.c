@@ -84,7 +84,7 @@ static struct in_addr *vt_route_lookup(const struct in_addr *addr)
 
 struct ra_entry {
 	struct list_head list;
-	struct sockaddr_v4v6 real_addr;
+	struct sockaddr_inx real_addr;
 	time_t last_recv;
 	time_t last_xmit;
 	int refs;
@@ -96,7 +96,7 @@ struct ra_entry {
 static struct list_head ra_set_hbase[RA_SET_HASH_SIZE];
 static unsigned ra_set_len;
 
-static inline uint32_t real_addr_hash(const struct sockaddr_v4v6 *sa)
+static inline uint32_t real_addr_hash(const struct sockaddr_inx *sa)
 {
 	if (sa->sa_family == AF_INET6) {
 		return jhash_2words(sa->sa_family, sa->in6.sin6_port,
@@ -107,7 +107,7 @@ static inline uint32_t real_addr_hash(const struct sockaddr_v4v6 *sa)
 	}
 }
 
-static struct ra_entry *ra_get_or_create(const struct sockaddr_v4v6 *sa)
+static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 {
 	struct list_head *chain = &ra_set_hbase[
 		real_addr_hash(sa) & (RA_SET_HASH_SIZE - 1)];
@@ -280,7 +280,7 @@ static struct tun_client *tun_client_try_get(const struct tun_addr *vaddr)
 }
 
 static struct tun_client *tun_client_get_or_create(
-		const struct tun_addr *vaddr, const struct sockaddr_v4v6 *raddr)
+		const struct tun_addr *vaddr, const struct sockaddr_inx *raddr)
 {
 	struct list_head *chain = &va_map_hbase[
 		tun_addr_hash(vaddr) & (VA_MAP_HASH_SIZE - 1)];
@@ -453,7 +453,7 @@ static int network_receiving(int tunfd, int sockfd)
 	struct tun_addr virt_addr;
 	struct tun_client *ce;
 	struct ra_entry *re;
-	struct sockaddr_v4v6 real_peer;
+	struct sockaddr_inx real_peer;
 	socklen_t real_peer_alen;
 	struct iovec iov[2];
 	int rc;
@@ -629,12 +629,12 @@ int run_server(int tunfd, const char *loc_addr_pair)
 {
 	struct timeval timeo;
 	int sockfd, rc;
-	struct sockaddr_v4v6 loc_addr;
+	struct sockaddr_inx loc_addr;
 	fd_set rset;
 	time_t last_walk;
 	char s_loc_addr[50];
 
-	if (get_sockaddr_v4v6_pair(loc_addr_pair, &loc_addr) < 0) {
+	if (get_sockaddr_inx_pair(loc_addr_pair, &loc_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
 	}

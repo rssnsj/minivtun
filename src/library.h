@@ -49,7 +49,7 @@ static inline bool is_in6_equal(const struct in6_addr *a1, const struct in6_addr
 	}
 }
 
-struct sockaddr_v4v6 {
+struct sockaddr_inx {
 	union {
 		sa_family_t sa_family;
 		struct sockaddr_in in;
@@ -61,8 +61,8 @@ struct sockaddr_v4v6 {
 #define addr_of_sockaddr(s) ((s)->sa_family == AF_INET6 ? (void *)&(s)->in6.sin6_addr : (void *)&(s)->in.sin_addr)
 #define sizeof_sockaddr(s)  ((s)->sa_family == AF_INET6 ? sizeof((s)->in6) : sizeof((s)->in))
 
-static inline bool is_sockaddr_equal(const struct sockaddr_v4v6 *a1,
-		const struct  sockaddr_v4v6 *a2)
+static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
+		const struct  sockaddr_inx *a2)
 {
 	if (a1->sa_family != a2->sa_family)
 		return false;
@@ -82,7 +82,7 @@ static inline bool is_sockaddr_equal(const struct sockaddr_v4v6 *a1,
 	return false;
 }
 
-int get_sockaddr_v4v6_pair(const char *pair, struct sockaddr_v4v6 *sa);
+int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
 
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {

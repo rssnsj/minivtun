@@ -176,9 +176,9 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	int sockfd, rc;
 	fd_set rset;
 	char s_peer_addr[50];
-	struct sockaddr_v4v6 peer_addr;
+	struct sockaddr_inx peer_addr;
 
-	if ((rc = get_sockaddr_v4v6_pair(peer_addr_pair, &peer_addr)) == 0) {
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, &peer_addr)) == 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
 		inet_ntop(peer_addr.sa_family, addr_of_sockaddr(&peer_addr),
@@ -253,7 +253,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			while (get_sockaddr_v4v6_pair(peer_addr_pair, &peer_addr) < 0) {
+			while (get_sockaddr_inx_pair(peer_addr_pair, &peer_addr) < 0) {
 				fprintf(stderr, "Failed to resolve '%s', retrying.\n", peer_addr_pair);
 				sleep(5);
 			}

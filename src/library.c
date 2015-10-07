@@ -130,7 +130,7 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int get_sockaddr_v4v6_pair(const char *pair, struct sockaddr_v4v6 *sa)
+int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 {
 	struct addrinfo hints, *result;
 	char host[51] = "", s_port[10] = "";
