@@ -152,7 +152,10 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 	} else {
 		return -EINVAL;
 	}
+
 	sprintf(s_port, "%d", port);
+	if (port <= 0 || port > 65535)
+		return -EINVAL;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
