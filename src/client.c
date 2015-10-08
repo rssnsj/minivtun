@@ -170,6 +170,27 @@ static int peer_keepalive(int sockfd)
 	return rc;
 }
 
+static int try_resolve_and_connect(const char *peer_addr_pair,
+		struct sockaddr_inx *peer_addr)
+{
+	int sockfd, rc;
+
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
+		return rc;
+
+	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		return -1;
+	}
+	if (connect(sockfd, (struct sockaddr *)peer_addr, sizeof_sockaddr(peer_addr)) < 0) {
+		close(sockfd);
+		return -EAGAIN;
+	}
+	set_nonblock(sockfd);
+
+	return sockfd;
+}
+
 int run_client(int tunfd, const char *peer_addr_pair)
 {
 	struct timeval timeo;
@@ -178,38 +199,26 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	char s_peer_addr[50];
 	struct sockaddr_inx peer_addr;
 
-	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, &peer_addr)) == 0) {
+	if ((sockfd = try_resolve_and_connect(peer_addr_pair, &peer_addr)) >= 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
 		inet_ntop(peer_addr.sa.sa_family, addr_of_sockaddr(&peer_addr),
 				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)), config.devname);
-
-		/* The initial connection. */
-		if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-			fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-			exit(1);
-		}
-		if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
-			fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
-			exit(1);
-		}
-		set_nonblock(sockfd);
-	} else if (rc == -EAGAIN && config.wait_dns) {
+	} else if (sockfd == -EAGAIN && config.wait_dns) {
 		/* Resolve later (last_recv = 0). */
 		last_recv = 0;
 		printf("Mini virtual tunnelling client, interface: %s. \n", config.devname);
-		printf("WARNING: DNS resolution of '%s' temporarily unavailable, "
-			   "resolving later.\n", peer_addr_pair);
-	} else if (rc == -EINVAL) {
+		printf("WARNING: Connection to '%s' temporarily unavailable, "
+			   "to be tried later.\n", peer_addr_pair);
+	} else if (sockfd == -EINVAL) {
 		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
 		return -1;
 	} else {
-		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", peer_addr_pair);
+		fprintf(stderr, "*** Unable to connect to '%s'.\n", peer_addr_pair);
 		return -1;
 	}
-
 
 	/* Run in background. */
 	if (config.in_background)
@@ -255,23 +264,15 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			while (get_sockaddr_inx_pair(peer_addr_pair, &peer_addr) < 0) {
-				fprintf(stderr, "Failed to resolve '%s', retrying.\n", peer_addr_pair);
-				sleep(5);
-			}
-
-			/* Reconnected OK. Reopen the socket for a different local port. */
+			/* Reopen the socket for a different local port. */
 			if (sockfd >= 0)
 				close(sockfd);
-			if ((sockfd = socket(peer_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-				exit(1);
-			}
-			if (connect(sockfd, (struct sockaddr *)&peer_addr, sizeof_sockaddr(&peer_addr)) < 0) {
-				fprintf(stderr, "*** Unable to connect to server: %s.\n", strerror(errno));
-				exit(1);
-			}
-			set_nonblock(sockfd);
+			do {
+				if ((sockfd = try_resolve_and_connect(peer_addr_pair, &peer_addr)) < 0) {
+					fprintf(stderr, "Unable to connect to '%s', retrying.\n", peer_addr_pair);
+					sleep(5);
+				}
+			} while (sockfd < 0);
 
 			last_keepalive = 0;
 			last_recv = current_ts;
