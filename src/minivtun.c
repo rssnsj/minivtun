@@ -35,6 +35,7 @@ struct minivtun_config config = {
 static struct option long_opts[] = {
 	{ "local", required_argument, 0, 'l', },
 	{ "remote", required_argument, 0, 'r', },
+	{ "resolve", required_argument, 0, 'R', },
 	{ "ipv4-addr", required_argument, 0, 'a', },
 	{ "ipv6-addr", required_argument, 0, 'A', },
 	{ "mtu", required_argument, 0, 'm', },
@@ -58,8 +59,9 @@ static void print_help(int argc, char *argv[])
 	printf("Usage:\n");
 	printf("  %s [options]\n", argv[0]);
 	printf("Options:\n");
-	printf("  -l, --local <ip:port>               IP:port for server to listen\n");
-	printf("  -r, --remote <ip:port>              IP:port of server to connect\n");
+	printf("  -l, --local <ip:port>               local IP:port for server to listen\n");
+	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
+	printf("  -R, --resolve <host:port>           try to resolve a hostname\n");
 	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
@@ -156,6 +158,21 @@ static void parse_virtual_route(const char *arg)
 	vt_route_add(&network, prefix, &gateway);
 }
 
+static int try_resolve_addr_pair(const char *addr_pair)
+{
+	struct sockaddr_inx inx;
+	char s_addr[50] = "";
+	int rc;
+
+	if ((rc = get_sockaddr_inx_pair(addr_pair, &inx)) < 0)
+		return 1;
+
+	inet_ntop(inx.sa.sa_family, addr_of_sockaddr(&inx), s_addr, sizeof(s_addr));
+	printf("[%s]:%u\n", s_addr, ntohs(port_of_sockaddr(&inx)));
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
@@ -164,7 +181,7 @@ int main(int argc, char *argv[])
 	char cmd[128];
 	int tunfd, opt;
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:k:n:p:e:t:v:dwh",
+	while ((opt = getopt_long(argc, argv, "r:l:R:a:A:m:k:n:p:e:t:v:dwh",
 			long_opts, NULL)) != -1) {
 
 		switch (opt) {
@@ -173,6 +190,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			peer_addr_pair = optarg;
+			break;
+		case 'R':
+			exit(try_resolve_addr_pair(optarg));
 			break;
 		case 'a':
 			tun_ip_config = optarg;
