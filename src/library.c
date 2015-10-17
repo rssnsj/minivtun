@@ -147,12 +147,20 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 
 	if (sscanf(pair, "[%50[^]]]:%d", host, &port) == 2) {
 	} else if (sscanf(pair, "%50[^:]:%d", host, &port) == 2) {
-	} else if (sscanf(pair, "%d", &port) == 1) {
-		strcpy(host, "0.0.0.0");
 	} else {
-		return -EINVAL;
+		/**
+		 * Address with a single port number, usually for
+		 * local IPv4 listen address.
+		 * e.g., "10000" is considered as "0.0.0.0:10000"
+		 */
+		const char *sp;
+		for (sp = pair; *sp; sp++) {
+			if (!(*sp >= '0' && *sp <= '9'))
+				return -EINVAL;
+		}
+		sscanf(pair, "%d", &port);
+		strcpy(host, "0.0.0.0");
 	}
-
 	sprintf(s_port, "%d", port);
 	if (port <= 0 || port > 65535)
 		return -EINVAL;
