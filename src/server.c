@@ -289,8 +289,8 @@ static struct tun_client *tun_client_get_or_create(
 
 	list_for_each_entry_safe (ce, __ce, chain, list) {
 		if (tun_addr_comp(&ce->virt_addr, vaddr) == 0) {
-			if (is_sockaddr_equal(&ce->ra->real_addr, raddr)) {
-				/* Real address changed, get a new entry for that. */
+			if (!is_sockaddr_equal(&ce->ra->real_addr, raddr)) {
+				/* Real address changed, reassign a new entry for it. */
 				ra_put_no_free(ce->ra);
 				if ((ce->ra = ra_get_or_create(raddr)) == NULL) {
 					tun_client_release(ce);
