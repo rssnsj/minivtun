@@ -69,7 +69,7 @@ static const char crypto_ivec_initdata[CRYPTO_MAX_BLOCK_SIZE] = {
 void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
 	EVP_CIPHER_CTX ctx;
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
@@ -92,7 +92,7 @@ void datagram_encrypt(const void *key, const void *cptype, void *in,
 void datagram_decrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
 	EVP_CIPHER_CTX ctx;
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
