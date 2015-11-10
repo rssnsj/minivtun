@@ -68,13 +68,13 @@ static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 		return false;
 
 	if (a1->sa.sa_family == AF_INET6) {
-		if (a1->in.sin_addr.s_addr == a2->in.sin_addr.s_addr &&
-			a1->in.sin_port == a2->in.sin_port) {
+		if (is_in6_equal(&a1->in6.sin6_addr, &a2->in6.sin6_addr) &&
+			a1->in6.sin6_port == a2->in6.sin6_port) {
 			return true;
 		}
 	} else {
-		if (is_in6_equal(&a1->in6.sin6_addr, &a2->in6.sin6_addr) &&
-			a1->in6.sin6_port == a2->in6.sin6_port) {
+		if (a1->in.sin_addr.s_addr == a2->in.sin_addr.s_addr &&
+			a1->in.sin_port == a2->in.sin_port) {
 			return true;
 		}
 	}
