@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <assert.h>
 #include <time.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -38,7 +39,7 @@ static int network_receiving(int tunfd, int sockfd)
 	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
 			(struct sockaddr *)&real_peer, &real_peer_alen);
 	if (rc <= 0)
-		return 0;
+		return -1;
 
 	out_data = crypt_buffer;
 	out_dlen = (size_t)rc;
@@ -47,7 +48,7 @@ static int network_receiving(int tunfd, int sockfd)
 
 	if (out_dlen < MINIVTUN_MSG_BASIC_HLEN)
 		return 0;
- 
+
 	/* Verify password. */
 	if (memcmp(nmsg->hdr.auth_key, config.crypto_key, 
 		sizeof(nmsg->hdr.auth_key)) != 0)
@@ -101,7 +102,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
 	if (rc < sizeof(struct tun_pi))
-		return 0;
+		return -1;
 
 	osx_af_to_ether(&pi->proto);
 
@@ -264,6 +265,7 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
+reconnect:
 			/* Reopen the socket for a different local port. */
 			if (sockfd >= 0)
 				close(sockfd);
@@ -289,10 +291,15 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		if (sockfd >= 0 && FD_ISSET(sockfd, &rset)) {
 			rc = network_receiving(tunfd, sockfd);
+			if (rc != 0) {
+				fprintf(stderr, "Connection went bad. About to reconnect.\n");
+				goto reconnect;
+			}
 		}
 
 		if (FD_ISSET(tunfd, &rset)) {
 			rc = tunnel_receiving(tunfd, sockfd);
+			assert(rc == 0);
 		}
 	}
 
