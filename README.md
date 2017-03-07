@@ -45,7 +45,7 @@ Compile and install
 					  <tun_lip/pfx_len>   IPv4 address/prefix length pair
 	  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair
 	  -m, --mtu <mtu>                     set MTU size, default: 1300.
-	  -t, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: 13
+	  -k, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: 13
 	  -n, --ifname <ifname>               virtual interface name
 	  -p, --pidfile <pid_file>            PID file of the daemon
 	  -e, --key <encryption_key>          shared password for data encryption
