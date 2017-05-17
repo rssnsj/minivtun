@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
@@ -184,30 +185,47 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 	return 0;
 }
 
-int do_daemonize(void)
+void do_daemonize(void)
 {
 	pid_t pid;
+	int fd;
+
+	/* Fork off the parent process */
+	if ((pid = fork()) < 0) {
+		/* Error */
+		fprintf(stderr, "*** fork() error: %s.\n", strerror(errno));
+		exit(1);
+	} else if (pid > 0) {
+		/* Let the parent process terminate */
+		exit(0);
+	}
+
+	/* Do this before child process quits to prevent duplicate printf output */
+	if ((fd = open("/dev/null", O_RDWR)) >= 0) {
+		dup2(fd, 0);
+		dup2(fd, 1);
+		dup2(fd, 2);
+		if (fd > 2)
+			close(fd);
+	}
+
+	/* Catch, ignore and handle signals */
+	signal(SIGCHLD, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
+
+	/* Let the child process become session leader */
+	if (setsid() < 0)
+		exit(1);
 
 	if ((pid = fork()) < 0) {
-		fprintf(stderr, "*** fork() error: %s.\n", strerror(errno));
-		return -1;
+		/* Error */
+		exit(1);
 	} else if (pid > 0) {
-		/* In parent process */
+		/* Let the parent process terminate */
 		exit(0);
-	} else {
-		/* In child process */
-		int fd;
-		setsid();
-		chdir("/tmp");
-		if ((fd = open("/dev/null", O_RDWR)) >= 0) {
-			dup2(fd, 0);
-			dup2(fd, 1);
-			dup2(fd, 2);
-			if (fd > 2)
-				close(fd);
-		}
 	}
-	return 0;
-}
 
+	/* OK, set up the grandchild process */
+	chdir("/tmp");
+}
 

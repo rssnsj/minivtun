@@ -178,7 +178,7 @@ static inline void hexdump(void *d, size_t len)
 	printf("\n");
 }
 
-int do_daemonize(void);
+void do_daemonize(void);
 
 #endif /* __LIBRARY_H */
 
