@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
@@ -69,7 +70,7 @@ static const char crypto_ivec_initdata[CRYPTO_MAX_BLOCK_SIZE] = {
 void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
 	EVP_CIPHER_CTX ctx;
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
@@ -92,7 +93,7 @@ void datagram_encrypt(const void *key, const void *cptype, void *in,
 void datagram_decrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
-	size_t iv_len = EVP_CIPHER_iv_length(cptype);
+	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
 	EVP_CIPHER_CTX ctx;
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
@@ -130,68 +131,101 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int v4pair_to_sockaddr(const char *pair, char sep, struct sockaddr_in *addr)
+int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 {
-	char host[64], *portp;
 	struct addrinfo hints, *result;
-	int rc;
+	char host[51] = "", s_port[10] = "";
+	int port = 0, rc;
 
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
-		addr->sin_family = AF_INET;
-		addr->sin_addr.s_addr = 0;
-		addr->sin_port = 0;
+		struct sockaddr_in *sa4 = (struct sockaddr_in *)sa;
+		sa4->sin_family = AF_INET;
+		sa4->sin_addr.s_addr = 0;
+		sa4->sin_port = 0;
 		return 0;
 	}
 
-	strncpy(host, pair, sizeof(host));
-	host[sizeof(host) - 1] = '\0';
-
-	if (!(portp = strchr(host, sep)))
+	if (sscanf(pair, "[%50[^]]]:%d", host, &port) == 2) {
+	} else if (sscanf(pair, "%50[^:]:%d", host, &port) == 2) {
+	} else {
+		/**
+		 * Address with a single port number, usually for
+		 * local IPv4 listen address.
+		 * e.g., "10000" is considered as "0.0.0.0:10000"
+		 */
+		const char *sp;
+		for (sp = pair; *sp; sp++) {
+			if (!(*sp >= '0' && *sp <= '9'))
+				return -EINVAL;
+		}
+		sscanf(pair, "%d", &port);
+		strcpy(host, "0.0.0.0");
+	}
+	sprintf(s_port, "%d", port);
+	if (port <= 0 || port > 65535)
 		return -EINVAL;
-	*(portp++) = '\0';
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;    /* Allow IPv4 or IPv6 */
+	hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;  /* For wildcard IP address */
 	hints.ai_protocol = 0;        /* Any protocol */
 	hints.ai_canonname = NULL;
 	hints.ai_addr = NULL;
 	hints.ai_next = NULL;
-	if ((rc = getaddrinfo(host, portp, &hints, &result)))
+
+	if ((rc = getaddrinfo(host, s_port, &hints, &result)))
 		return -EAGAIN;
 
 	/* Get the first resolution. */
-	*addr = *(struct sockaddr_in *)result->ai_addr;
+	memcpy(sa, result->ai_addr, result->ai_addrlen);
+
 	freeaddrinfo(result);
 	return 0;
 }
 
-int do_daemonize(void)
+void do_daemonize(void)
 {
 	pid_t pid;
+	int fd;
+
+	/* Fork off the parent process */
+	if ((pid = fork()) < 0) {
+		/* Error */
+		fprintf(stderr, "*** fork() error: %s.\n", strerror(errno));
+		exit(1);
+	} else if (pid > 0) {
+		/* Let the parent process terminate */
+		exit(0);
+	}
+
+	/* Do this before child process quits to prevent duplicate printf output */
+	if ((fd = open("/dev/null", O_RDWR)) >= 0) {
+		dup2(fd, 0);
+		dup2(fd, 1);
+		dup2(fd, 2);
+		if (fd > 2)
+			close(fd);
+	}
+
+	/* Catch, ignore and handle signals */
+	signal(SIGCHLD, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
+
+	/* Let the child process become session leader */
+	if (setsid() < 0)
+		exit(1);
 
 	if ((pid = fork()) < 0) {
-		fprintf(stderr, "*** fork() error: %s.\n", strerror(errno));
-		return -1;
+		/* Error */
+		exit(1);
 	} else if (pid > 0) {
-		/* In parent process */
+		/* Let the parent process terminate */
 		exit(0);
-	} else {
-		/* In child process */
-		int fd;
-		setsid();
-		chdir("/tmp");
-		if ((fd = open("/dev/null", O_RDWR)) >= 0) {
-			dup2(fd, 0);
-			dup2(fd, 1);
-			dup2(fd, 2);
-			if (fd > 2)
-				close(fd);
-		}
 	}
-	return 0;
-}
 
+	/* OK, set up the grandchild process */
+	chdir("/tmp");
+}
 

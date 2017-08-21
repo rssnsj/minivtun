@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <assert.h>
 #include <time.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -21,7 +22,6 @@
 #include "minivtun.h"
 
 static time_t last_recv = 0, last_keepalive = 0, current_ts = 0;
-static struct sockaddr_in peer_addr;
 
 static int network_receiving(int tunfd, int sockfd)
 {
@@ -39,7 +39,7 @@ static int network_receiving(int tunfd, int sockfd)
 	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
 			(struct sockaddr *)&real_peer, &real_peer_alen);
 	if (rc <= 0)
-		return 0;
+		return -1;
 
 	out_data = crypt_buffer;
 	out_dlen = (size_t)rc;
@@ -48,7 +48,7 @@ static int network_receiving(int tunfd, int sockfd)
 
 	if (out_dlen < MINIVTUN_MSG_BASIC_HLEN)
 		return 0;
- 
+
 	/* Verify password. */
 	if (memcmp(nmsg->hdr.auth_key, config.crypto_key, 
 		sizeof(nmsg->hdr.auth_key)) != 0)
@@ -102,7 +102,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
 	if (rc < sizeof(struct tun_pi))
-		return 0;
+		return -1;
 
 	osx_af_to_ether(&pi->proto);
 
@@ -132,8 +132,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = sendto(sockfd, out_data, out_dlen, 0,
-		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	rc = send(sockfd, out_data, out_dlen, 0);
 	/**
 	 * NOTICE: Don't update this on each tunnel packet
 	 * transmit. We always need to keep the local virtual IP
@@ -162,8 +161,7 @@ static int peer_keepalive(int sockfd)
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
-	rc = sendto(sockfd, out_msg, out_len, 0,
-		(struct sockaddr *)&peer_addr, sizeof(peer_addr));
+	rc = send(sockfd, out_msg, out_len, 0);
 
 	/* Update 'last_keepalive' only when it's really sent out. */
 	if (rc > 0) {
@@ -173,41 +171,55 @@ static int peer_keepalive(int sockfd)
 	return rc;
 }
 
+static int try_resolve_and_connect(const char *peer_addr_pair,
+		struct sockaddr_inx *peer_addr)
+{
+	int sockfd, rc;
+
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
+		return rc;
+
+	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		return -1;
+	}
+	if (connect(sockfd, (struct sockaddr *)peer_addr, sizeof_sockaddr(peer_addr)) < 0) {
+		close(sockfd);
+		return -EAGAIN;
+	}
+	set_nonblock(sockfd);
+
+	return sockfd;
+}
+
 int run_client(int tunfd, const char *peer_addr_pair)
 {
 	struct timeval timeo;
-	int sockfd, rc;
+	int sockfd = -1, rc;
 	fd_set rset;
-	char s_peer_addr[44];
+	char s_peer_addr[50];
+	struct sockaddr_inx peer_addr;
 
-	if ((rc = v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr)) == 0) {
+	if ((sockfd = try_resolve_and_connect(peer_addr_pair, &peer_addr)) >= 0) {
 		/* DNS resolve OK, start service normally. */
 		last_recv = time(NULL);
-		inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
-			s_peer_addr, sizeof(s_peer_addr));
+		inet_ntop(peer_addr.sa.sa_family, addr_of_sockaddr(&peer_addr),
+				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunnelling client to %s:%u, interface: %s.\n",
-			s_peer_addr, ntohs(peer_addr.sin_port), config.devname);
-	} else if (rc == -EAGAIN && config.wait_dns) {
+				s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)), config.devname);
+	} else if (sockfd == -EAGAIN && config.wait_dns) {
 		/* Resolve later (last_recv = 0). */
 		last_recv = 0;
 		printf("Mini virtual tunnelling client, interface: %s. \n", config.devname);
-		printf("WARNING: DNS resolution of '%s' temporarily unavailable, "
-			"resolving later.\n", peer_addr_pair);
-	} else if (rc == -EINVAL) {
+		printf("WARNING: Connection to '%s' temporarily unavailable, "
+			   "to be tried later.\n", peer_addr_pair);
+	} else if (sockfd == -EINVAL) {
 		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
 		return -1;
 	} else {
-		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", peer_addr_pair);
+		fprintf(stderr, "*** Unable to connect to '%s'.\n", peer_addr_pair);
 		return -1;
 	}
-
-
-	/* The initial tunnelling connection. */
-	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-		exit(1);
-	}
-	set_nonblock(sockfd);
 
 	/* Run in background. */
 	if (config.in_background)
@@ -227,7 +239,8 @@ int run_client(int tunfd, const char *peer_addr_pair)
 	for (;;) {
 		FD_ZERO(&rset);
 		FD_SET(tunfd, &rset);
-		FD_SET(sockfd, &rset);
+		if (sockfd >= 0)
+			FD_SET(sockfd, &rset);
 
 		timeo.tv_sec = 2;
 		timeo.tv_usec = 0;
@@ -246,30 +259,29 @@ int run_client(int tunfd, const char *peer_addr_pair)
 
 		/* Packet transmission timed out, send keep-alive packet. */
 		if (current_ts - last_keepalive > config.keepalive_timeo) {
-			peer_keepalive(sockfd);
+			if (sockfd >= 0)
+				peer_keepalive(sockfd);
 		}
 
 		/* Connection timed out, try reconnecting. */
 		if (current_ts - last_recv > config.reconnect_timeo) {
-			while (v4pair_to_sockaddr(peer_addr_pair, ':', &peer_addr) < 0) {
-				fprintf(stderr, "Failed to resolve '%s', retrying.\n",
-					peer_addr_pair);
-				sleep(5);
-			}
-
-			/* Reconnected OK. Reopen the socket for a different local port. */
-			close(sockfd);
-			if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-				fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-				exit(1);
-			}
+reconnect:
+			/* Reopen the socket for a different local port. */
+			if (sockfd >= 0)
+				close(sockfd);
+			do {
+				if ((sockfd = try_resolve_and_connect(peer_addr_pair, &peer_addr)) < 0) {
+					fprintf(stderr, "Unable to connect to '%s', retrying.\n", peer_addr_pair);
+					sleep(5);
+				}
+			} while (sockfd < 0);
 
 			last_keepalive = 0;
 			last_recv = current_ts;
 
-			inet_ntop(peer_addr.sin_family, &peer_addr.sin_addr,
-				s_peer_addr, sizeof(s_peer_addr));
-			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(peer_addr.sin_port));
+			inet_ntop(peer_addr.sa.sa_family, addr_of_sockaddr(&peer_addr), s_peer_addr,
+					  sizeof(s_peer_addr));
+			printf("Reconnected to %s:%u.\n", s_peer_addr, ntohs(port_of_sockaddr(&peer_addr)));
 			continue;
 		}
 
@@ -277,12 +289,17 @@ int run_client(int tunfd, const char *peer_addr_pair)
 		if (rc == 0)
 			continue;
 
-		if (FD_ISSET(sockfd, &rset)) {
+		if (sockfd >= 0 && FD_ISSET(sockfd, &rset)) {
 			rc = network_receiving(tunfd, sockfd);
+			if (rc != 0) {
+				fprintf(stderr, "Connection went bad. About to reconnect.\n");
+				goto reconnect;
+			}
 		}
 
 		if (FD_ISSET(tunfd, &rset)) {
 			rc = tunnel_receiving(tunfd, sockfd);
+			assert(rc == 0);
 		}
 	}
 
