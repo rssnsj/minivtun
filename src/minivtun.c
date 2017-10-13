@@ -86,7 +86,7 @@ static void print_help(int argc, char *argv[])
 static int tun_alloc(char *dev)
 {
 	int fd = -1, err;
-#if defined( __APPLE__)  || defined(__FreeBSD__) 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 	int b_enable = 1, i;
 
 	for (i = 0; i < 8; i++) {
@@ -267,7 +267,7 @@ int main(int argc, char *argv[])
 		config.local_tun_in = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			struct in_addr __network = { .s_addr = 0 };
-#if defined( __APPLE__)  || defined(__FreeBSD__) 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 			sprintf(cmd, "ifconfig %s %s %s", config.devname, s_lip, s_rip);
 #else
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.devname, s_lip, s_rip);
@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
 			uint32_t mask = ~((1 << (32 - pfxlen)) - 1);
-#if defined( __APPLE__)  || defined(__FreeBSD__) 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 			uint32_t network = ntohl(vaddr.s_addr) & mask;
 			sprintf(s_rip, "%u.%u.%u.%u", network >> 24, (network >> 16) & 0xff,
 					(network >> 8) & 0xff, network & 0xff);
@@ -320,7 +320,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 
-#if defined( __APPLE__)  || defined(__FreeBSD__) 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.devname, s_lip, pfxlen);
 #else
 		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfxlen);
