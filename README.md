@@ -32,7 +32,16 @@ Compile and install
     cd minivtun/src
     make
     sudo make install
+### Installation for FreeBSD
 
+Install TUNTAP driver for Mac OS X: http://tuntaposx.sourceforge.net/
+
+Compile and install
+
+    git clone https://github.com/rssnsj/minivtun.git minivtun
+    cd minivtun/src
+    gmake
+    sudo gmake install
 ### Usage
 
 	Mini virtual tunneller in non-standard protocol.

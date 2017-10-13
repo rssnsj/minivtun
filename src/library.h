@@ -100,7 +100,7 @@ static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-#ifdef __APPLE__
+#if defined( __APPLE__)  || defined(__FreeBSD__) 
 	#include <net/if.h>
 
 	/* Protocol info prepended to the packets */
