@@ -30,7 +30,7 @@ static int network_receiving(int tunfd, int sockfd)
 	struct tun_pi pi;
 	void *out_data;
 	size_t ip_dlen, out_dlen;
-	struct sockaddr_in real_peer;
+	struct sockaddr_inx real_peer;
 	socklen_t real_peer_alen;
 	struct iovec iov[2];
 	int rc;
