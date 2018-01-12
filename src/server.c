@@ -6,12 +6,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <assert.h>
 #include <time.h>
 #include <signal.h>
-#include <assert.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
@@ -462,7 +462,7 @@ static int network_receiving(int tunfd, int sockfd)
 	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
 			(struct sockaddr *)&real_peer, &real_peer_alen);
 	if (rc <= 0)
-		return 0;
+		return -1;
 
 	out_data = crypt_buffer;
 	out_dlen = (size_t)rc;
@@ -471,7 +471,7 @@ static int network_receiving(int tunfd, int sockfd)
 
 	if (out_dlen < MINIVTUN_MSG_BASIC_HLEN)
 		return 0;
- 
+
 	/* Verify password. */
 	if (memcmp(nmsg->hdr.auth_key, config.crypto_key,
 		sizeof(nmsg->hdr.auth_key)) != 0)
@@ -553,7 +553,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 
 	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
 	if (rc < sizeof(struct tun_pi))
-		return 0;
+		return -1;
 
 	osx_af_to_ether(&pi->proto);
 
@@ -661,6 +661,7 @@ int run_server(int tunfd, const char *loc_addr_pair)
 	/* Run in background. */
 	if (config.in_background)
 		do_daemonize();
+
 	if (config.pid_file) {
 		FILE *fp;
 		if ((fp = fopen(config.pid_file, "w"))) {

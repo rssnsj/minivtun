@@ -50,7 +50,7 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
 
 	/* Verify password. */
-	if (memcmp(nmsg->hdr.auth_key, config.crypto_key, 
+	if (memcmp(nmsg->hdr.auth_key, config.crypto_key,
 		sizeof(nmsg->hdr.auth_key)) != 0)
 		return 0;
 
@@ -305,4 +305,3 @@ reconnect:
 
 	return 0;
 }
-
