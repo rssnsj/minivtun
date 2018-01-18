@@ -3,7 +3,7 @@ A fast secure and reliable VPN service in non-standard protocol for rapidly depl
 
 ### Key features
 * Fast: direct UDP-encapsulated without complex authentication handshakes.
-* Secure: both header and tunnel data are encrypted, which is impossible to be tracked by protocol characteristics and blocked, unless all UDP ports are blocked by your firewall; spoofed packets from unauthorized peer are dropped immediately.
+* Secure: both header and tunnel data are encrypted, which is nearly impossible to be tracked by protocol characteristics and blocked, unless all UDP ports are blocked by your firewall; spoofed packets from unauthorized peer are dropped immediately.
 * Reliable: communication recovers immediately from next received packet from client after the previous session was dead, which makes the connection extremely reliable.
 * Rapid to deploy: a standalone program to run; all configuration are specified in command line with very few options.
 
