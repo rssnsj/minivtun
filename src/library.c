@@ -71,7 +71,7 @@ void datagram_encrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
 	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
-	EVP_CIPHER_CTX ctx;
+	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
 
@@ -80,12 +80,13 @@ void datagram_encrypt(const void *key, const void *cptype, void *in,
 
 	memcpy(iv, crypto_ivec_initdata, iv_len);
 	CRYPTO_DATA_PADDING(in, dlen, iv_len);
-	EVP_CIPHER_CTX_init(&ctx);
-	assert(EVP_EncryptInit_ex(&ctx, cptype, NULL, key, iv));
-	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	assert(EVP_EncryptUpdate(&ctx, out, &outl, in, *dlen));
-	assert(EVP_EncryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
-	EVP_CIPHER_CTX_cleanup(&ctx);
+	EVP_CIPHER_CTX_init(ctx);
+	assert(EVP_EncryptInit_ex(ctx, cptype, NULL, key, iv));
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
+	assert(EVP_EncryptUpdate(ctx, out, &outl, in, *dlen));
+	assert(EVP_EncryptFinal_ex(ctx, (unsigned char *)out + outl, &outl2));
+	EVP_CIPHER_CTX_cleanup(ctx);
+	EVP_CIPHER_CTX_free(ctx);
 
 	*dlen = (size_t)(outl + outl2);
 }
@@ -94,7 +95,7 @@ void datagram_decrypt(const void *key, const void *cptype, void *in,
 		void *out, size_t *dlen)
 {
 	size_t iv_len = EVP_CIPHER_iv_length((const EVP_CIPHER *)cptype);
-	EVP_CIPHER_CTX ctx;
+	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 	unsigned char iv[CRYPTO_MAX_KEY_SIZE];
 	int outl = 0, outl2 = 0;
 
@@ -103,12 +104,13 @@ void datagram_decrypt(const void *key, const void *cptype, void *in,
 
 	memcpy(iv, crypto_ivec_initdata, iv_len);
 	CRYPTO_DATA_PADDING(in, dlen, iv_len);
-	EVP_CIPHER_CTX_init(&ctx);
-	assert(EVP_DecryptInit_ex(&ctx, cptype, NULL, key, iv));
-	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	assert(EVP_DecryptUpdate(&ctx, out, &outl, in, *dlen));
-	assert(EVP_DecryptFinal_ex(&ctx, (unsigned char *)out + outl, &outl2));
-	EVP_CIPHER_CTX_cleanup(&ctx);
+	EVP_CIPHER_CTX_init(ctx);
+	assert(EVP_DecryptInit_ex(ctx, cptype, NULL, key, iv));
+	EVP_CIPHER_CTX_set_padding(ctx, 0);
+	assert(EVP_DecryptUpdate(ctx, out, &outl, in, *dlen));
+	assert(EVP_DecryptFinal_ex(ctx, (unsigned char *)out + outl, &outl2));
+	EVP_CIPHER_CTX_cleanup(ctx);
+	EVP_CIPHER_CTX_free(ctx);
 
 	*dlen = (size_t)(outl + outl2);
 }
