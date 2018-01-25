@@ -1,0 +1,17 @@
+[Unit]
+Description=MiniVTun Service
+After=network.target
+[Service]
+Type=forking
+
+ExecStart=/opt/minivtun/minivtun_server_startup.sh
+ExecStop=/opt/minivtun/minivtun_server_shutdown.sh
+
+User=mclub
+Group=mclub
+UMask=0007
+RestartSec=10
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
