@@ -10,22 +10,16 @@
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
-#include <time.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <fcntl.h>
 #include <sys/uio.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 
 #include "list.h"
 #include "jhash.h"
 #include "minivtun.h"
 
-/* Timestamp for each loop. */
-static time_t current_ts = 0;
-static uint32_t hash_initval = 0;
+static __u32 hash_initval = 0;
 
 /**
  * Pseudo route table for binding client side subnets
@@ -43,7 +37,7 @@ static unsigned vt_routes_len = 0;
 int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway)
 {
 	struct vt_route *rt;
-	uint32_t mask;
+	__u32 mask;
 
 	if (prefix == 0) {
 		mask = 0;
@@ -85,8 +79,8 @@ static struct in_addr *vt_route_lookup(const struct in_addr *addr)
 struct ra_entry {
 	struct list_head list;
 	struct sockaddr_inx real_addr;
-	time_t last_recv;
-	time_t last_xmit;
+	struct timeval last_recv;
+	__u16 xmit_seq;
 	int refs;
 };
 
@@ -96,11 +90,11 @@ struct ra_entry {
 static struct list_head ra_set_hbase[RA_SET_HASH_SIZE];
 static unsigned ra_set_len;
 
-static inline uint32_t real_addr_hash(const struct sockaddr_inx *sa)
+static inline __u32 real_addr_hash(const struct sockaddr_inx *sa)
 {
 	if (sa->sa.sa_family == AF_INET6) {
 		return jhash_2words(sa->sa.sa_family, sa->in6.sin6_port,
-			jhash2((uint32_t *)&sa->in6.sin6_addr, 4, hash_initval));
+			jhash2((__u32 *)&sa->in6.sin6_addr, 4, hash_initval));
 	} else {
 		return jhash_3words(sa->sa.sa_family, sa->in.sin_port,
 			sa->in.sin_addr.s_addr, hash_initval);
@@ -128,6 +122,7 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 	}
 
 	re->real_addr = *sa;
+	re->xmit_seq = (__u16)rand();
 	re->refs = 1;
 	list_add_tail(&re->list, chain);
 	ra_set_len++;
@@ -171,8 +166,7 @@ struct tun_client {
 	struct list_head list;
 	struct tun_addr virt_addr;
 	struct ra_entry *ra;
-	time_t last_recv;
-	time_t last_xmit;
+	struct timeval last_recv;
 };
 
 /* Hash table of virtual address in tunnel. */
@@ -194,7 +188,7 @@ static inline void init_va_ra_maps(void)
 	ra_set_len = 0;
 }
 
-static inline uint32_t tun_addr_hash(const struct tun_addr *addr)
+static inline __u32 tun_addr_hash(const struct tun_addr *addr)
 {
 	if (addr->af == AF_INET) {
 		return jhash_2words(addr->af, addr->in.s_addr, hash_initval);
@@ -241,9 +235,9 @@ static inline void tun_client_dump(struct tun_client *ce)
 			  sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			  s_real_addr, sizeof(s_real_addr));
-	printf("[%s] (%s:%u), last_recv: %lu, last_xmit: %lu\n", s_virt_addr,
+	printf("[%s] (%s:%u), last_recv: %lu\n", s_virt_addr,
 			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)),
-			(unsigned long)ce->last_recv, (unsigned long)ce->last_xmit);
+			(unsigned long)ce->last_recv.tv_sec);
 }
 #endif
 
@@ -328,47 +322,40 @@ static struct tun_client *tun_client_get_or_create(
 	return ce;
 }
 
-/**
- * Send keep-alive packet to the corresponding client
- * with information stored in 're'.
- */
-static int ra_entry_keepalive(struct ra_entry *re, int sockfd)
+/* Send echo reply back to a client */
+static void send_echo_ack(struct minivtun_msg *req, struct ra_entry *re)
 {
 	char in_data[64], crypt_buffer[64];
 	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
 	void *out_msg;
 	size_t out_len;
-	int rc;
 
-	nmsg->hdr.opcode = MINIVTUN_MSG_KEEPALIVE;
-	memset(nmsg->hdr.rsv, 0x0, sizeof(nmsg->hdr.rsv));
+	memset(&nmsg->hdr, 0x0, sizeof(nmsg->hdr));
+	nmsg->hdr.opcode = MINIVTUN_MSG_ECHO_ACK;
+	nmsg->hdr.seq = htons(re->xmit_seq++);
 	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
-	nmsg->keepalive.loc_tun_in = config.local_tun_in;
-	nmsg->keepalive.loc_tun_in6 = config.local_tun_in6;
+	nmsg->echo = req->echo;
 
 	out_msg = crypt_buffer;
-	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive);
+	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->echo);
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
-	rc = sendto(sockfd, out_msg, out_len, 0, (struct sockaddr *)&re->real_addr,
-				sizeof_sockaddr(&re->real_addr));
-
-	/* Update 'last_xmit' only when it's really sent out. */
-	if (rc > 0) {
-		re->last_xmit = current_ts;
-	}
-
-	return rc;
+	(void)sendto(state.sockfd, out_msg, out_len, 0,
+			(const struct sockaddr *)&re->real_addr,
+			sizeof_sockaddr(&re->real_addr));
 }
 
-static void va_ra_walk_continue(int sockfd)
+static void va_ra_walk_continue(void)
 {
 	static unsigned va_index = 0, ra_index = 0;
+	struct timeval __current;
 	unsigned va_walk_max = VA_MAP_LIMIT_EACH_WALK, va_count = 0;
 	unsigned ra_walk_max = RA_SET_LIMIT_EACH_WALK, ra_count = 0;
 	unsigned __va_index = va_index, __ra_index = ra_index;
 	struct tun_client *ce, *__ce;
 	struct ra_entry *re, *__re;
+
+	gettimeofday(&__current, NULL);
 
 	if (va_walk_max > va_map_len)
 		va_walk_max = va_map_len;
@@ -380,7 +367,7 @@ static void va_ra_walk_continue(int sockfd)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
-				if (current_ts - ce->last_recv > config.reconnect_timeo) {
+				if (__current.tv_sec - ce->last_recv.tv_sec > config.reconnect_timeo) {
 					tun_client_release(ce);
 				}
 				va_count++;
@@ -393,12 +380,10 @@ static void va_ra_walk_continue(int sockfd)
 	if (ra_walk_max > 0) {
 		do {
 			list_for_each_entry_safe (re, __re, &ra_set_hbase[ra_index], list) {
-				if (current_ts - re->last_recv > config.reconnect_timeo) {
+				if (__current.tv_sec - re->last_recv.tv_sec > config.reconnect_timeo) {
 					if (re->refs == 0) {
 						ra_entry_release(re);
 					}
-				} else if (current_ts - re->last_xmit > config.keepalive_timeo) {
-					ra_entry_keepalive(re, sockfd);
 				}
 				ra_count++;
 			}
@@ -442,7 +427,7 @@ static inline void dest_addr_of_ipdata(
 }
 
 
-static int network_receiving(int tunfd, int sockfd)
+static int network_receiving(void)
 {
 	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
 	struct minivtun_msg *nmsg;
@@ -456,10 +441,13 @@ static int network_receiving(int tunfd, int sockfd)
 	struct sockaddr_inx real_peer;
 	socklen_t real_peer_alen;
 	struct iovec iov[2];
+	struct timeval __current;
 	int rc;
 
+	gettimeofday(&__current, NULL);
+
 	real_peer_alen = sizeof(real_peer);
-	rc = recvfrom(sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
+	rc = recvfrom(state.sockfd, &read_buffer, NM_PI_BUFFER_SIZE, 0,
 			(struct sockaddr *)&real_peer, &real_peer_alen);
 	if (rc <= 0)
 		return -1;
@@ -478,24 +466,28 @@ static int network_receiving(int tunfd, int sockfd)
 		return 0;
 
 	switch (nmsg->hdr.opcode) {
-	case MINIVTUN_MSG_KEEPALIVE:
+	case MINIVTUN_MSG_ECHO_REQ:
+		/* Keep the real address alive */
 		if ((re = ra_get_or_create(&real_peer))) {
-			re->last_recv = current_ts;
+			re->last_recv = __current;
+			/* Send echo reply */
+			send_echo_ack(nmsg, re);
 			ra_put_no_free(re);
 		}
-		if (out_dlen < MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->keepalive))
+		if (out_dlen < MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->echo))
 			return 0;
-		if (is_valid_unicast_in(&nmsg->keepalive.loc_tun_in)) {
+		/* Keep virtual addresses alive */
+		if (is_valid_unicast_in(&nmsg->echo.loc_tun_in)) {
 			virt_addr.af = AF_INET;
-			virt_addr.in = nmsg->keepalive.loc_tun_in;
+			virt_addr.in = nmsg->echo.loc_tun_in;
 			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
-				ce->last_recv = current_ts;
+				ce->last_recv = __current;
 		}
-		if (is_valid_unicast_in6(&nmsg->keepalive.loc_tun_in6)) {
+		if (is_valid_unicast_in6(&nmsg->echo.loc_tun_in6)) {
 			virt_addr.af = AF_INET6;
-			virt_addr.in6 = nmsg->keepalive.loc_tun_in6;
+			virt_addr.in6 = nmsg->echo.loc_tun_in6;
 			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
-				ce->last_recv = current_ts;
+				ce->last_recv = __current;
 		}
 		break;
 	case MINIVTUN_MSG_IPDATA:
@@ -522,8 +514,8 @@ static int network_receiving(int tunfd, int sockfd)
 		if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)) == NULL)
 			return 0;
 
-		ce->last_recv = current_ts;
-		ce->ra->last_recv = current_ts;
+		ce->last_recv = __current;
+		ce->ra->last_recv = __current;
 
 		pi.flags = 0;
 		pi.proto = nmsg->ipdata.proto;
@@ -532,14 +524,14 @@ static int network_receiving(int tunfd, int sockfd)
 		iov[0].iov_len = sizeof(pi);
 		iov[1].iov_base = (char *)nmsg + MINIVTUN_MSG_IPDATA_OFFSET;
 		iov[1].iov_len = ip_dlen;
-		rc = writev(tunfd, iov, 2);
+		rc = writev(state.tunfd, iov, 2);
 		break;
 	}
 
 	return 0;
 }
 
-static int tunnel_receiving(int tunfd, int sockfd)
+static int tunnel_receiving(void)
 {
 	char read_buffer[NM_PI_BUFFER_SIZE], crypt_buffer[NM_PI_BUFFER_SIZE];
 	struct tun_pi *pi = (void *)read_buffer;
@@ -551,7 +543,7 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	struct tun_client *ce;
 	int rc;
 
-	rc = read(tunfd, pi, NM_PI_BUFFER_SIZE);
+	rc = read(state.tunfd, pi, NM_PI_BUFFER_SIZE);
 	if (rc < sizeof(struct tun_pi))
 		return -1;
 
@@ -604,8 +596,9 @@ static int tunnel_receiving(int tunfd, int sockfd)
 		}
 	}
 
+	memset(&nmsg.hdr, 0x0, sizeof(nmsg.hdr));
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
-	memset(nmsg.hdr.rsv, 0x0, sizeof(nmsg.hdr.rsv));
+	nmsg.hdr.seq = htons(ce->ra->xmit_seq++);
 	memcpy(nmsg.hdr.auth_key, config.crypto_key, sizeof(nmsg.hdr.auth_key));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
@@ -616,47 +609,41 @@ static int tunnel_receiving(int tunfd, int sockfd)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = sendto(sockfd, out_data, out_dlen, 0,
-				(struct sockaddr *)&ce->ra->real_addr,
-				sizeof_sockaddr(&ce->ra->real_addr));
-	ce->last_xmit = current_ts;
-	ce->ra->last_xmit = current_ts;
+	(void)sendto(state.sockfd, out_data, out_dlen, 0,
+			(struct sockaddr *)&ce->ra->real_addr,
+			sizeof_sockaddr(&ce->ra->real_addr));
 
 	return 0;
 }
 
-int run_server(int tunfd, const char *loc_addr_pair)
+int run_server(const char *loc_addr_pair)
 {
-	struct timeval timeo;
-	int sockfd, rc;
-	struct sockaddr_inx loc_addr;
-	fd_set rset;
-	time_t last_walk;
 	char s_loc_addr[50];
 
-	if (get_sockaddr_inx_pair(loc_addr_pair, &loc_addr) < 0) {
+	if (get_sockaddr_inx_pair(loc_addr_pair, &state.local_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
 	}
 
-	inet_ntop(loc_addr.sa.sa_family, addr_of_sockaddr(&loc_addr), s_loc_addr,
-			  sizeof(s_loc_addr));
-	printf("Mini virtual tunnelling server on %s:%u, interface: %s.\n",
-			s_loc_addr, ntohs(port_of_sockaddr(&loc_addr)), config.devname);
+	inet_ntop(state.local_addr.sa.sa_family, addr_of_sockaddr(&state.local_addr),
+			s_loc_addr, sizeof(s_loc_addr));
+	printf("Mini virtual tunneling server on %s:%u, interface: %s.\n",
+			s_loc_addr, ntohs(port_of_sockaddr(&state.local_addr)), config.devname);
 
 	/* Initialize address map hash table. */
 	init_va_ra_maps();
-	hash_initval = (uint32_t)time(NULL);
+	hash_initval = rand();
 
-	if ((sockfd = socket(loc_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+	if ((state.sockfd = socket(state.local_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
-	if (bind(sockfd, (struct sockaddr *)&loc_addr, sizeof_sockaddr(&loc_addr)) < 0) {
+	if (bind(state.sockfd, (struct sockaddr *)&state.local_addr,
+		sizeof_sockaddr(&state.local_addr)) < 0) {
 		fprintf(stderr, "*** bind() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
-	set_nonblock(sockfd);
+	set_nonblock(state.sockfd);
 
 	/* Run in background. */
 	if (config.in_background)
@@ -670,38 +657,40 @@ int run_server(int tunfd, const char *loc_addr_pair)
 		}
 	}
 
-	last_walk = time(NULL);
+	gettimeofday(&state.last_walk, NULL);
 
 	for (;;) {
+		fd_set rset;
+		struct timeval __current, timeo;
+		int rc;
+
 		FD_ZERO(&rset);
-		FD_SET(tunfd, &rset);
-		FD_SET(sockfd, &rset);
+		FD_SET(state.tunfd, &rset);
+		FD_SET(state.sockfd, &rset);
 
-		timeo.tv_sec = 2;
-		timeo.tv_usec = 0;
-
-		rc = select((tunfd > sockfd ? tunfd : sockfd) + 1, &rset, NULL, NULL, &timeo);
+		timeo = (struct timeval) { 2, 0 };
+		rc = select((state.tunfd > state.sockfd ? state.tunfd : state.sockfd) + 1,
+				&rset, NULL, NULL, &timeo);
 		if (rc < 0) {
 			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
 			return -1;
 		}
 
-		current_ts = time(NULL);
-
 		if (rc > 0) {
-			if (FD_ISSET(sockfd, &rset)) {
-				rc = network_receiving(tunfd, sockfd);
+			if (FD_ISSET(state.sockfd, &rset)) {
+				rc = network_receiving();
 			}
 
-			if (FD_ISSET(tunfd, &rset)) {
-				rc = tunnel_receiving(tunfd, sockfd);
+			if (FD_ISSET(state.tunfd, &rset)) {
+				rc = tunnel_receiving();
 			}
 		}
 
 		/* Check connection state at each chance. */
-		if (current_ts - last_walk >= 3) {
-			va_ra_walk_continue(sockfd);
-			last_walk = current_ts;
+		gettimeofday(&__current, NULL);
+		if (__current.tv_sec - state.last_walk.tv_sec >= 3) {
+			va_ra_walk_continue();
+			state.last_walk = __current;
 		}
 	}
 

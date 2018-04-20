@@ -10,6 +10,7 @@
 #include "library.h"
 
 extern struct minivtun_config config;
+extern struct state_variables state;
 
 struct minivtun_config {
 	unsigned reconnect_timeo;
@@ -27,10 +28,28 @@ struct minivtun_config {
 	struct in6_addr local_tun_in6;
 };
 
+/* Status variables during VPN running */
+struct state_variables {
+	int tunfd;
+	int sockfd;
+
+	/* Client specific */
+	struct sockaddr_inx peer_addr;
+	struct timeval last_recv;
+	struct timeval last_echo_req;
+	struct timeval last_echo_ack;
+	__u16 xmit_seq;
+
+	/* Server specific */
+	struct sockaddr_inx local_addr;
+	struct timeval last_walk;
+};
+
 enum {
-	MINIVTUN_MSG_KEEPALIVE,
+	MINIVTUN_MSG_ECHO_REQ,
 	MINIVTUN_MSG_IPDATA,
 	MINIVTUN_MSG_DISCONNECT,
+	MINIVTUN_MSG_ECHO_ACK,
 };
 
 #define NM_PI_BUFFER_SIZE  (1024 * 8)
@@ -38,7 +57,8 @@ enum {
 struct minivtun_msg {
 	struct {
 		__u8 opcode;
-		__u8 rsv[3];
+		__u8 rsv;
+		__be16 seq;
 		__u8 auth_key[16];
 	}  __attribute__((packed)) hdr;
 
@@ -51,7 +71,8 @@ struct minivtun_msg {
 		struct {
 			struct in_addr loc_tun_in;
 			struct in6_addr loc_tun_in6;
-		} __attribute__((packed)) keepalive;
+			__be32 id;
+		} __attribute__((packed)) echo;
 	};
 } __attribute__((packed));
 
@@ -77,8 +98,8 @@ static inline void netmsg_to_local(void *in, void **out, size_t *dlen)
 	}
 }
 
-int run_client(int tunfd, const char *peer_addr_pair);
-int run_server(int tunfd, const char *loc_addr_pair);
+int run_client(const char *peer_addr_pair);
+int run_server(const char *loc_addr_pair);
 int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway);
 
 #endif /* __MINIVTUN_H */

@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <errno.h>
-#include <time.h>
+#include <sys/time.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -30,6 +30,11 @@ struct minivtun_config config = {
 	.pid_file = NULL,
 	.in_background = false,
 	.wait_dns = false,
+};
+
+struct state_variables state = {
+	.tunfd = -1,
+	.sockfd = -1,
 };
 
 static struct option long_opts[] = {
@@ -179,7 +184,7 @@ int main(int argc, char *argv[])
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
 	char cmd[128];
-	int tunfd, opt;
+	int opt;
 
 	while ((opt = getopt_long(argc, argv, "r:l:R:a:A:m:k:n:p:e:t:v:dwh",
 			long_opts, NULL)) != -1) {
@@ -237,9 +242,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/* Random seed */
+	srand(getpid());
+
 	if (strlen(config.devname) == 0)
 		strcpy(config.devname, "mv%d");
-	if ((tunfd = tun_alloc(config.devname)) < 0) {
+	if ((state.tunfd = tun_alloc(config.devname)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -274,9 +282,9 @@ int main(int argc, char *argv[])
 #endif
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
-			uint32_t mask = ~((1 << (32 - pfxlen)) - 1);
+			__u32 mask = ~((1 << (32 - pfxlen)) - 1);
 #if defined(__APPLE__) || defined(__FreeBSD__)
-			uint32_t network = ntohl(vaddr.s_addr) & mask;
+			__u32 network = ntohl(vaddr.s_addr) & mask;
 			sprintf(s_rip, "%u.%u.%u.%u", network >> 24, (network >> 16) & 0xff,
 					(network >> 8) & 0xff, network & 0xff);
 			sprintf(cmd, "ifconfig %s %s %s && route add -net %s/%d %s >/dev/null",
@@ -344,9 +352,9 @@ int main(int argc, char *argv[])
 	}
 
 	if (loc_addr_pair) {
-		run_server(tunfd, loc_addr_pair);
+		run_server(loc_addr_pair);
 	} else if (peer_addr_pair) {
-		run_client(tunfd, peer_addr_pair);
+		run_client(peer_addr_pair);
 	} else {
 		fprintf(stderr, "*** No valid local or peer address specified.\n");
 		exit(1);

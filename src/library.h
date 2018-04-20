@@ -8,9 +8,11 @@
 #define __LIBRARY_H
 
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stddef.h>
-#include <netdb.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 
 #define __be32 uint32_t
@@ -86,14 +88,14 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
 
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {
-	uint32_t a = ntohl(in->s_addr);
+	__u32 a = ntohl(in->s_addr);
 	return  ((a & 0xff000000) != 0x00000000) &&
 			((a & 0xf0000000) != 0xe0000000);
 }
 
 static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 {
-	uint32_t a0 = ntohl(((__be32 *)in6)[0]);
+	__u32 a0 = ntohl(((__be32 *)in6)[0]);
 	return  ((a0 & 0xff000000) != 0x00000000) &&
 			((a0 & 0xff000000) != 0xff000000);
 }
