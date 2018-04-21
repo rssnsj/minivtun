@@ -35,10 +35,10 @@ struct state_variables {
 
 	/* Client specific */
 	struct sockaddr_inx peer_addr;
+	__u16 xmit_seq;
 	struct timeval last_recv;
 	struct timeval last_echo_req;
-	struct timeval last_echo_ack;
-	__u16 xmit_seq;
+	bool echo_pending;
 
 	/* Server specific */
 	struct sockaddr_inx local_addr;

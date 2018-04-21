@@ -82,7 +82,7 @@ static int network_receiving(void)
 		rc = writev(state.tunfd, iov, 2);
 		break;
 	case MINIVTUN_MSG_ECHO_ACK:
-		state.last_echo_ack = __current;
+		state.echo_pending = false;
 		break;
 	}
 
@@ -131,18 +131,12 @@ static int tunnel_receiving(void)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	rc = send(state.sockfd, out_data, out_dlen, 0);
-	/**
-	 * NOTICE: Don't update this on each tunnel packet
-	 * transmit. We always need to keep the local virtual IP
-	 * (-a local/...) alive.
-	 */
-	/* last_keepalive = current_ts; */
+	(void)send(state.sockfd, out_data, out_dlen, 0);
 
 	return 0;
 }
 
-static void send_echo_req(void)
+static void do_an_echo_request(void)
 {
 	char in_data[64], crypt_buffer[64];
 	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
@@ -162,9 +156,11 @@ static void send_echo_req(void)
 	local_to_netmsg(nmsg, &out_msg, &out_len);
 
 	(void)send(state.sockfd, out_msg, out_len, 0);
+
+	state.echo_pending = true;
 }
 
-static int try_resolve_and_connect(const char *peer_addr_pair,
+static int resolve_and_connect(const char *peer_addr_pair,
 		struct sockaddr_inx *peer_addr)
 {
 	int sockfd, rc;
@@ -185,20 +181,28 @@ static int try_resolve_and_connect(const char *peer_addr_pair,
 	return sockfd;
 }
 
+static void reset_state_on_reconnect(void)
+{
+	state.xmit_seq = (__u16)rand();
+	gettimeofday(&state.last_recv, NULL);
+	/* Trigger the first echo request to be sent */
+	state.last_echo_req = (struct timeval) { 0, 0 };
+	state.echo_pending = false;
+}
+
 int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
 
-	if ((state.sockfd = try_resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
-		/* DNS resolve OK, start service normally. */
-		gettimeofday(&state.last_recv, NULL);
+	if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
+		/* DNS resolve OK, start service normally */
+		reset_state_on_reconnect();
 		inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunneling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.devname);
 	} else if (state.sockfd == -EAGAIN && config.wait_dns) {
-		/* Resolve later (state.last_recv = 0). */
-		state.last_recv = (struct timeval) { 0, 0 };
+		/* Connect later (state.sockfd < 0) */
 		printf("Mini virtual tunneling client, interface: %s. \n", config.devname);
 		printf("WARNING: Connection to '%s' temporarily unavailable, "
 			   "to be retried later.\n", peer_addr_pair);
@@ -210,7 +214,7 @@ int run_client(const char *peer_addr_pair)
 		return -1;
 	}
 
-	/* Run in background. */
+	/* Run in background */
 	if (config.in_background)
 		do_daemonize();
 
@@ -221,9 +225,6 @@ int run_client(const char *peer_addr_pair)
 			fclose(fp);
 		}
 	}
-
-	/* Trigger the first echo request to be sent. */
-	state.last_echo_req = state.last_echo_ack = (struct timeval) { 0, 0 };
 
 	for (;;) {
 		fd_set rset;
@@ -245,38 +246,32 @@ int run_client(const char *peer_addr_pair)
 
 		gettimeofday(&__current, NULL);
 
-		/* Fix pertentially corrupted date */
+		/* Date corruption check */
 		if (timercmp(&state.last_echo_req, &__current, >))
 			state.last_echo_req = __current;
-		if (timercmp(&state.last_echo_ack, &__current, >))
-			state.last_echo_ack = __current;
 		if (timercmp(&state.last_recv, &__current, >))
 			state.last_recv = __current;
 
-		/* Send echo request. */
-		if (__current.tv_sec - state.last_echo_req.tv_sec > config.keepalive_timeo) {
-			if (state.sockfd >= 0) {
-				send_echo_req();
-				gettimeofday(&state.last_echo_req, NULL);
-			}
+		/* Send echo request */
+		if (state.sockfd >= 0 &&
+			__current.tv_sec - state.last_echo_req.tv_sec > config.keepalive_timeo) {
+			do_an_echo_request();
+			state.last_echo_req = __current;
 		}
 
-		/* Connection timed out, try reconnecting. */
-		if (__current.tv_sec - state.last_recv.tv_sec > config.reconnect_timeo) {
+		/* Connection timed out, try to reconnect */
+		if (state.sockfd < 0 ||
+			__current.tv_sec - state.last_recv.tv_sec > config.reconnect_timeo) {
 reconnect:
-			/* Reopen the socket for a different local port. */
+			/* Reopen socket for a different local port */
 			if (state.sockfd >= 0)
 				close(state.sockfd);
-			if ((state.sockfd = try_resolve_and_connect(peer_addr_pair, &state.peer_addr)) < 0) {
+			if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) < 0) {
 				fprintf(stderr, "Unable to connect to '%s', retrying.\n", peer_addr_pair);
 				sleep(5);
 				goto reconnect;
 			}
-
-			gettimeofday(&state.last_recv, NULL);
-			/* Trigger the first echo request to be sent */
-			state.last_echo_req = state.last_echo_ack = (struct timeval) { 0, 0 };
-
+			reset_state_on_reconnect();
 			inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 					s_peer_addr, sizeof(s_peer_addr));
 			printf("Reconnected to %s:%u.\n", s_peer_addr,
@@ -284,7 +279,7 @@ reconnect:
 			continue;
 		}
 
-		/* No result from select(), do nothing. */
+		/* No result from select(), do nothing */
 		if (rc == 0)
 			continue;
 
