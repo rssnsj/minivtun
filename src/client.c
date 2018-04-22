@@ -82,7 +82,11 @@ static int network_receiving(void)
 		rc = writev(state.tunfd, iov, 2);
 		break;
 	case MINIVTUN_MSG_ECHO_ACK:
-		state.echo_pending = false;
+		if (state.has_pending_echo && nmsg->echo.id == state.pending_echo_id) {
+			state.total_echo_rcvd++;
+			state.total_rtt_ms += __sub_timeval_ms(&__current, &state.last_echo_sent);
+			state.has_pending_echo = false;
+		}
 		break;
 	}
 
@@ -142,6 +146,7 @@ static void do_an_echo_request(void)
 	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
 	void *out_msg;
 	size_t out_len;
+	__be32 r = rand();
 
 	memset(&nmsg->hdr, 0x0, sizeof(nmsg->hdr));
 	nmsg->hdr.opcode = MINIVTUN_MSG_ECHO_REQ;
@@ -149,7 +154,7 @@ static void do_an_echo_request(void)
 	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
 	nmsg->echo.loc_tun_in = config.local_tun_in;
 	nmsg->echo.loc_tun_in6 = config.local_tun_in6;
-	nmsg->echo.id = rand();
+	nmsg->echo.id = r;
 
 	out_msg = crypt_buffer;
 	out_len = MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->echo);
@@ -157,7 +162,45 @@ static void do_an_echo_request(void)
 
 	(void)send(state.sockfd, out_msg, out_len, 0);
 
-	state.echo_pending = true;
+	state.has_pending_echo = true;
+	state.pending_echo_id = r; /* must be checked on ECHO_ACK */
+	state.total_echo_sent++;
+}
+
+static void reset_health_assess_data(void)
+{
+	state.total_echo_sent = 0;
+	state.total_echo_rcvd = 0;
+	state.total_rtt_ms = 0;
+}
+
+static void reset_state_on_reconnect(void)
+{
+	struct timeval __current;
+	gettimeofday(&__current, NULL);
+	state.xmit_seq = (__u16)rand();
+	state.last_recv = __current;
+	state.last_echo_sent = (struct timeval) { 0, 0 }; /* trigger the first echo */
+	state.last_health_assess = __current;
+	state.has_pending_echo = false;
+	state.pending_echo_id = 0;
+	reset_health_assess_data();
+}
+
+static bool do_link_health_assess(void)
+{
+	unsigned loss = state.total_echo_sent > 0 ?
+		((state.total_echo_sent - state.total_echo_rcvd) * 100 / state.total_echo_sent) : 0;
+	unsigned rtt = state.total_echo_rcvd > 0 ?
+		(unsigned)(state.total_rtt_ms / state.total_echo_rcvd) : 0;
+
+	printf("Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
+			state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
+
+	reset_health_assess_data();
+
+	/* FIXME: return a valid health state */
+	return true;
 }
 
 static int resolve_and_connect(const char *peer_addr_pair,
@@ -181,15 +224,6 @@ static int resolve_and_connect(const char *peer_addr_pair,
 	return sockfd;
 }
 
-static void reset_state_on_reconnect(void)
-{
-	state.xmit_seq = (__u16)rand();
-	gettimeofday(&state.last_recv, NULL);
-	/* Trigger the first echo request to be sent */
-	state.last_echo_req = (struct timeval) { 0, 0 };
-	state.echo_pending = false;
-}
-
 int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
@@ -200,10 +234,10 @@ int run_client(const char *peer_addr_pair)
 		inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 				  s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunneling client to %s:%u, interface: %s.\n",
-				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.devname);
+				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.ifname);
 	} else if (state.sockfd == -EAGAIN && config.wait_dns) {
 		/* Connect later (state.sockfd < 0) */
-		printf("Mini virtual tunneling client, interface: %s. \n", config.devname);
+		printf("Mini virtual tunneling client, interface: %s. \n", config.ifname);
 		printf("WARNING: Connection to '%s' temporarily unavailable, "
 			   "to be retried later.\n", peer_addr_pair);
 	} else if (state.sockfd == -EINVAL) {
@@ -236,7 +270,7 @@ int run_client(const char *peer_addr_pair)
 		if (state.sockfd >= 0)
 			FD_SET(state.sockfd, &rset);
 
-		timeo = (struct timeval) { 2, 0 };
+		timeo = (struct timeval) { 1, 0 };
 		rc = select((state.tunfd > state.sockfd ? state.tunfd : state.sockfd) + 1,
 					&rset, NULL, NULL, &timeo);
 		if (rc < 0) {
@@ -247,21 +281,29 @@ int run_client(const char *peer_addr_pair)
 		gettimeofday(&__current, NULL);
 
 		/* Date corruption check */
-		if (timercmp(&state.last_echo_req, &__current, >))
-			state.last_echo_req = __current;
+		if (timercmp(&state.last_echo_sent, &__current, >))
+			state.last_echo_sent = __current;
 		if (timercmp(&state.last_recv, &__current, >))
 			state.last_recv = __current;
 
-		/* Send echo request */
-		if (state.sockfd >= 0 &&
-			__current.tv_sec - state.last_echo_req.tv_sec > config.keepalive_timeo) {
+		/* Calculate packet loss and RTT for a link health assess */
+		if (__sub_timeval_ms(&__current, &state.last_health_assess) >=
+			config.health_assess_timeo * 1000) {
+			state.last_health_assess = __current;
+			if (!do_link_health_assess())
+				goto reconnect;
+		}
+
+		/* Start an echo test */
+		if (state.sockfd >= 0 && __sub_timeval_ms(&__current, &state.last_echo_sent)
+				>= config.keepalive_timeo * 1000) {
 			do_an_echo_request();
-			state.last_echo_req = __current;
+			state.last_echo_sent = __current;
 		}
 
 		/* Connection timed out, try to reconnect */
-		if (state.sockfd < 0 ||
-			__current.tv_sec - state.last_recv.tv_sec > config.reconnect_timeo) {
+		if (state.sockfd < 0 || __sub_timeval_ms(&__current, &state.last_recv)
+				>= config.reconnect_timeo * 1000) {
 reconnect:
 			/* Reopen socket for a different local port */
 			if (state.sockfd >= 0)
@@ -278,10 +320,6 @@ reconnect:
 					ntohs(port_of_sockaddr(&state.peer_addr)));
 			continue;
 		}
-
-		/* No result from select(), do nothing */
-		if (rc == 0)
-			continue;
 
 		if (state.sockfd >= 0 && FD_ISSET(state.sockfd, &rset)) {
 			rc = network_receiving();

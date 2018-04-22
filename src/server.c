@@ -367,7 +367,8 @@ static void va_ra_walk_continue(void)
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
 				//tun_client_dump(ce);
-				if (__current.tv_sec - ce->last_recv.tv_sec > config.reconnect_timeo) {
+				if (__sub_timeval_ms(&__current, &ce->last_recv) >
+					config.reconnect_timeo * 1000) {
 					tun_client_release(ce);
 				}
 				va_count++;
@@ -380,7 +381,8 @@ static void va_ra_walk_continue(void)
 	if (ra_walk_max > 0) {
 		do {
 			list_for_each_entry_safe (re, __re, &ra_set_hbase[ra_index], list) {
-				if (__current.tv_sec - re->last_recv.tv_sec > config.reconnect_timeo) {
+				if (__sub_timeval_ms(&__current, &re->last_recv) >
+					config.reconnect_timeo * 1000) {
 					if (re->refs == 0) {
 						ra_entry_release(re);
 					}
@@ -628,7 +630,7 @@ int run_server(const char *loc_addr_pair)
 	inet_ntop(state.local_addr.sa.sa_family, addr_of_sockaddr(&state.local_addr),
 			s_loc_addr, sizeof(s_loc_addr));
 	printf("Mini virtual tunneling server on %s:%u, interface: %s.\n",
-			s_loc_addr, ntohs(port_of_sockaddr(&state.local_addr)), config.devname);
+			s_loc_addr, ntohs(port_of_sockaddr(&state.local_addr)), config.ifname);
 
 	/* Initialize address map hash table. */
 	init_va_ra_maps();
@@ -676,19 +678,17 @@ int run_server(const char *loc_addr_pair)
 			return -1;
 		}
 
-		if (rc > 0) {
-			if (FD_ISSET(state.sockfd, &rset)) {
-				rc = network_receiving();
-			}
+		if (FD_ISSET(state.sockfd, &rset)) {
+			rc = network_receiving();
+		}
 
-			if (FD_ISSET(state.tunfd, &rset)) {
-				rc = tunnel_receiving();
-			}
+		if (FD_ISSET(state.tunfd, &rset)) {
+			rc = tunnel_receiving();
 		}
 
 		/* Check connection state at each chance. */
 		gettimeofday(&__current, NULL);
-		if (__current.tv_sec - state.last_walk.tv_sec >= 3) {
+		if (__sub_timeval_ms(&__current, &state.last_walk) >= 3 * 1000) {
 			va_ra_walk_continue();
 			state.last_walk = __current;
 		}

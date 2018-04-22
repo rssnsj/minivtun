@@ -15,7 +15,8 @@ extern struct state_variables state;
 struct minivtun_config {
 	unsigned reconnect_timeo;
 	unsigned keepalive_timeo;
-	char devname[40];
+	unsigned health_assess_timeo;
+	char ifname[40];
 	unsigned tun_mtu;
 	const char *crypto_passwd;
 	const char *pid_file;
@@ -33,14 +34,20 @@ struct state_variables {
 	int tunfd;
 	int sockfd;
 
-	/* Client specific */
+	/* *** Client specific *** */
 	struct sockaddr_inx peer_addr;
 	__u16 xmit_seq;
 	struct timeval last_recv;
-	struct timeval last_echo_req;
-	bool echo_pending;
+	struct timeval last_echo_sent;
+	struct timeval last_health_assess;
+	bool has_pending_echo;
+	__be32 pending_echo_id;
+	/* Health assess data */
+	unsigned total_echo_sent;
+	unsigned total_echo_rcvd;
+	unsigned long total_rtt_ms;
 
-	/* Server specific */
+	/* *** Server specific *** */
 	struct sockaddr_inx local_addr;
 	struct timeval last_walk;
 };

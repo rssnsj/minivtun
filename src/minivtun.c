@@ -21,9 +21,10 @@
 #include "minivtun.h"
 
 struct minivtun_config config = {
-	.keepalive_timeo = 13,
-	.reconnect_timeo = 60,
-	.devname = "",
+	.keepalive_timeo = 7,
+	.reconnect_timeo = 30,
+	.health_assess_timeo = 70,
+	.ifname = "",
 	.tun_mtu = 1300,
 	.crypto_passwd = "",
 	.crypto_type = NULL,
@@ -212,8 +213,8 @@ int main(int argc, char *argv[])
 			config.keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
 			break;
 		case 'n':
-			strncpy(config.devname, optarg, sizeof(config.devname) - 1);
-			config.devname[sizeof(config.devname) - 1] = '\0';
+			strncpy(config.ifname, optarg, sizeof(config.ifname) - 1);
+			config.ifname[sizeof(config.ifname) - 1] = '\0';
 			break;
 		case 'p':
 			config.pid_file = optarg;
@@ -245,9 +246,9 @@ int main(int argc, char *argv[])
 	/* Random seed */
 	srand(getpid());
 
-	if (strlen(config.devname) == 0)
-		strcpy(config.devname, "mv%d");
-	if ((state.tunfd = tun_alloc(config.devname)) < 0) {
+	if (strlen(config.ifname) == 0)
+		strcpy(config.ifname, "mv%d");
+	if ((state.tunfd = tun_alloc(config.ifname)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
 	}
@@ -276,9 +277,9 @@ int main(int argc, char *argv[])
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			struct in_addr __network = { .s_addr = 0 };
 #if defined(__APPLE__) || defined(__FreeBSD__)
-			sprintf(cmd, "ifconfig %s %s %s", config.devname, s_lip, s_rip);
+			sprintf(cmd, "ifconfig %s %s %s", config.ifname, s_lip, s_rip);
 #else
-			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.devname, s_lip, s_rip);
+			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.ifname, s_lip, s_rip);
 #endif
 			vt_route_add(&__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
@@ -288,11 +289,11 @@ int main(int argc, char *argv[])
 			sprintf(s_rip, "%u.%u.%u.%u", network >> 24, (network >> 16) & 0xff,
 					(network >> 8) & 0xff, network & 0xff);
 			sprintf(cmd, "ifconfig %s %s %s && route add -net %s/%d %s >/dev/null",
-					config.devname, s_lip, s_lip, s_rip, pfxlen, s_lip);
+					config.ifname, s_lip, s_lip, s_rip, pfxlen, s_lip);
 #else
 			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
 					(mask >> 8) & 0xff, mask & 0xff);
-			sprintf(cmd, "ifconfig %s %s netmask %s", config.devname, s_lip, s_rip);
+			sprintf(cmd, "ifconfig %s %s netmask %s", config.ifname, s_lip, s_rip);
 #endif
 		} else {
 			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
@@ -329,15 +330,15 @@ int main(int argc, char *argv[])
 		}
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.devname, s_lip, pfxlen);
+		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.ifname, s_lip, pfxlen);
 #else
-		sprintf(cmd, "ifconfig %s add %s/%d", config.devname, s_lip, pfxlen);
+		sprintf(cmd, "ifconfig %s add %s/%d", config.ifname, s_lip, pfxlen);
 #endif
 		(void)system(cmd);
 	}
 
 	/* Always bring it up with proper MTU size. */
-	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", config.devname, config.tun_mtu, config.devname);
+	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", config.ifname, config.tun_mtu, config.ifname);
 	(void)system(cmd);
 
 	if (enabled_encryption()) {

@@ -15,13 +15,13 @@
 #include <netdb.h>
 #include <netinet/in.h>
 
-#define __be32 uint32_t
-#define __be16 uint16_t
-#define __u32 uint32_t
-#define __u16 uint16_t
-#define __u8 uint8_t
+typedef uint32_t __be32;
+typedef uint16_t __be16;
+typedef uint32_t __u32;
+typedef uint16_t __u16;
+typedef uint8_t __u8;
 
-#define bool char
+typedef char bool;
 #define true 1
 #define false 0
 
@@ -164,6 +164,17 @@ void datagram_decrypt(const void *key, const void *cptype, void *in,
 void fill_with_string_md5sum(const char *in, void *out, size_t outlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+
+static inline long __sub_timeval_ms(const struct timeval *a,
+		const struct timeval *b)
+{
+	long secs = a->tv_sec - b->tv_sec;
+	if (secs > 1000000)
+		return 1000000000;
+	if (secs < -1000000)
+		return -1000000000;
+	return secs * 1000 + (a->tv_usec - b->tv_usec) / 1000;
+}
 
 static inline int set_nonblock(int sockfd)
 {
