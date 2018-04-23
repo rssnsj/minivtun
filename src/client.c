@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
+#include <syslog.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
@@ -63,7 +64,7 @@ static int network_receiving(void)
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
 				return 0;
 		} else {
-			fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
 			return 0;
 		}
 
@@ -118,7 +119,7 @@ static int tunnel_receiving(void)
 		if (ip_dlen < 40)
 			return 0;
 	} else {
-		fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
 		return 0;
 	}
 
@@ -200,7 +201,7 @@ static bool do_link_health_assess(void)
 
 	reset_health_assess_data();
 
-	/* FIXME: return a valid health state */
+	/* FIXME: return an effective health state */
 	return true;
 }
 
@@ -229,6 +230,8 @@ int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
 
+	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
+
 	if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
 		/* DNS resolve OK, start service normally */
 		reset_state_on_reconnect();
@@ -240,7 +243,7 @@ int run_client(const char *peer_addr_pair)
 		/* Connect later (state.sockfd < 0) */
 		printf("Mini virtual tunneling client, interface: %s. \n", config.ifname);
 		printf("WARNING: Connection to '%s' temporarily unavailable, "
-			   "to be retried later.\n", peer_addr_pair);
+				"to be retried later.\n", peer_addr_pair);
 	} else if (state.sockfd == -EINVAL) {
 		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
 		return -1;
@@ -317,17 +320,13 @@ reconnect:
 			reset_state_on_reconnect();
 			inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 					s_peer_addr, sizeof(s_peer_addr));
-			printf("Reconnected to %s:%u.\n", s_peer_addr,
+			syslog(LOG_INFO, "Reconnected to %s:%u.\n", s_peer_addr,
 					ntohs(port_of_sockaddr(&state.peer_addr)));
 			continue;
 		}
 
 		if (state.sockfd >= 0 && FD_ISSET(state.sockfd, &rset)) {
 			rc = network_receiving();
-			if (rc != 0) {
-				fprintf(stderr, "Connection went bad. About to reconnect.\n");
-				goto reconnect;
-			}
 		}
 
 		if (FD_ISSET(state.tunfd, &rset)) {
@@ -335,6 +334,8 @@ reconnect:
 			assert(rc == 0);
 		}
 	}
+
+	closelog();
 
 	return 0;
 }

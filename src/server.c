@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
+#include <syslog.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
@@ -46,7 +47,7 @@ int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gatew
 	}
 
 	if (vt_routes_len >= VIRTUAL_ROUTE_MAX) {
-		fprintf(stderr, "*** Virtual route table is full.\n");
+		syslog(LOG_ERR, "*** Virtual route table is full.\n");
 		return -1;
 	}
 
@@ -65,8 +66,6 @@ static struct in_addr *vt_route_lookup(const struct in_addr *addr)
 
 	for (i = 0; i < vt_routes_len; i++) {
 		struct vt_route *rt = vt_routes[i];
-		
-		printf("0x%08x,0x%08x,0x%08x\n", addr->s_addr, rt->netmask.s_addr, rt->network.s_addr);
 		if ((addr->s_addr & rt->netmask.s_addr) == rt->network.s_addr)
 			return &rt->gateway;
 	}
@@ -116,8 +115,7 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 	}
 
 	if ((re = malloc(sizeof(*re))) == NULL) {
-		fprintf(stderr, "*** [%s] malloc(): %s.\n", __FUNCTION__,
-				strerror(errno));
+		syslog(LOG_ERR, "*** [%s] malloc(): %s.\n", __FUNCTION__, strerror(errno));
 		return NULL;
 	}
 
@@ -128,8 +126,9 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 	ra_set_len++;
 
 	inet_ntop(re->real_addr.sa.sa_family, addr_of_sockaddr(&re->real_addr),
-			  s_real_addr, sizeof(s_real_addr));
-	printf("New client [%s:%u]\n", s_real_addr, port_of_sockaddr(&re->real_addr));
+			s_real_addr, sizeof(s_real_addr));
+	syslog(LOG_INFO, "New client [%s:%u]\n", s_real_addr,
+			port_of_sockaddr(&re->real_addr));
 
 	return re;
 }
@@ -149,8 +148,9 @@ static inline void ra_entry_release(struct ra_entry *re)
 	ra_set_len--;
 
 	inet_ntop(re->real_addr.sa.sa_family, addr_of_sockaddr(&re->real_addr),
-			  s_real_addr, sizeof(s_real_addr));
-	printf("Recycled client [%s:%u]\n", s_real_addr, ntohs(port_of_sockaddr(&re->real_addr)));
+			s_real_addr, sizeof(s_real_addr));
+	syslog(LOG_INFO, "Recycled client [%s:%u]\n", s_real_addr,
+			ntohs(port_of_sockaddr(&re->real_addr)));
 
 	free(re);
 }
@@ -245,12 +245,11 @@ static inline void tun_client_release(struct tun_client *ce)
 {
 	char s_virt_addr[50], s_real_addr[50];
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
-			  sizeof(s_virt_addr));
+	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
-			  s_real_addr, sizeof(s_real_addr));
-	printf("Recycled virtual address [%s] at [%s:%u].\n", s_virt_addr, s_real_addr,
-			ntohs(port_of_sockaddr(&ce->ra->real_addr)));
+			s_real_addr, sizeof(s_real_addr));
+	syslog(LOG_INFO, "Recycled virtual address [%s] at [%s:%u].\n", s_virt_addr,
+			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	ra_put_no_free(ce->ra);
 
@@ -297,8 +296,7 @@ static struct tun_client *tun_client_get_or_create(
 
 	/* Not found, always create new entry. */
 	if ((ce = malloc(sizeof(*ce))) == NULL) {
-		fprintf(stderr, "*** [%s] malloc(): %s.\n", __FUNCTION__,
-				strerror(errno));
+		syslog(LOG_ERR, "*** [%s] malloc(): %s.\n", __FUNCTION__, strerror(errno));
 		return NULL;
 	}
 
@@ -316,8 +314,8 @@ static struct tun_client *tun_client_get_or_create(
 			  sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			  s_real_addr, sizeof(s_real_addr));
-	printf("New virtual address [%s] at [%s:%u].\n", s_virt_addr, s_real_addr,
-			ntohs(port_of_sockaddr(&ce->ra->real_addr)));
+	syslog(LOG_INFO, "New virtual address [%s] at [%s:%u].\n", s_virt_addr,
+			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	return ce;
 }
@@ -503,7 +501,7 @@ static int network_receiving(void)
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
 				return 0;
 		} else {
-			fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
 			return 0;
 		}
 
@@ -563,7 +561,7 @@ static int tunnel_receiving(void)
 		if (ip_dlen < 40)
 			return 0;
 	} else {
-		fprintf(stderr, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
 		return 0;
 	}
 
@@ -621,6 +619,8 @@ static int tunnel_receiving(void)
 int run_server(const char *loc_addr_pair)
 {
 	char s_loc_addr[50];
+
+	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
 
 	if (get_sockaddr_inx_pair(loc_addr_pair, &state.local_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
@@ -693,6 +693,8 @@ int run_server(const char *loc_addr_pair)
 			state.last_walk = __current;
 		}
 	}
+
+	closelog();
 
 	return 0;
 }

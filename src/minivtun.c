@@ -23,7 +23,7 @@
 struct minivtun_config config = {
 	.keepalive_timeo = 7,
 	.reconnect_timeo = 30,
-	.health_assess_timeo = 70,
+	.health_assess_timeo = 100,
 	.ifname = "",
 	.tun_mtu = 1300,
 	.crypto_passwd = "",
