@@ -169,6 +169,9 @@ static void do_an_echo_request(void)
 
 static void reset_health_assess_data(void)
 {
+	state.has_pending_echo = false;
+	state.pending_echo_id = 0;
+
 	state.total_echo_sent = 0;
 	state.total_echo_rcvd = 0;
 	state.total_rtt_ms = 0;
@@ -182,8 +185,6 @@ static void reset_state_on_reconnect(void)
 	state.last_recv = __current;
 	state.last_echo_sent = (struct timeval) { 0, 0 }; /* trigger the first echo */
 	state.last_health_assess = __current;
-	state.has_pending_echo = false;
-	state.pending_echo_id = 0;
 	reset_health_assess_data();
 }
 
