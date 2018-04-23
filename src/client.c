@@ -196,7 +196,7 @@ static bool do_link_health_assess(void)
 	unsigned rtt = state.total_echo_rcvd > 0 ?
 		(unsigned)(state.total_rtt_ms / state.total_echo_rcvd) : 0;
 
-	printf("Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
+	syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
 			state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
 
 	reset_health_assess_data();

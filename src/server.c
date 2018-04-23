@@ -321,7 +321,7 @@ static struct tun_client *tun_client_get_or_create(
 }
 
 /* Send echo reply back to a client */
-static void send_echo_ack(struct minivtun_msg *req, struct ra_entry *re)
+static void reply_an_echo_ack(struct minivtun_msg *req, struct ra_entry *re)
 {
 	char in_data[64], crypt_buffer[64];
 	struct minivtun_msg *nmsg = (struct minivtun_msg *)in_data;
@@ -471,7 +471,7 @@ static int network_receiving(void)
 		if ((re = ra_get_or_create(&real_peer))) {
 			re->last_recv = __current;
 			/* Send echo reply */
-			send_echo_ack(nmsg, re);
+			reply_an_echo_ack(nmsg, re);
 			ra_put_no_free(re);
 		}
 		if (out_dlen < MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->echo))
