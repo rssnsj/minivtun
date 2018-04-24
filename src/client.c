@@ -241,6 +241,7 @@ int run_client(const char *peer_addr_pair)
 				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.ifname);
 	} else if (state.sockfd == -EAGAIN && config.wait_dns) {
 		/* Connect later (state.sockfd < 0) */
+		gettimeofday(&state.last_health_assess, NULL);
 		printf("Mini virtual tunneling client, interface: %s. \n", config.ifname);
 		printf("WARNING: Connection to '%s' temporarily unavailable, "
 				"to be retried later.\n", peer_addr_pair);
