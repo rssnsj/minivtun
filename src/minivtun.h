@@ -25,8 +25,8 @@ struct minivtun_config {
 
 	char crypto_key[CRYPTO_MAX_KEY_SIZE];
 	const void *crypto_type;
-	struct in_addr local_tun_in;
-	struct in6_addr local_tun_in6;
+	struct in_addr tun_in_local;
+	struct in6_addr tun_in6_local;
 };
 
 /* Status variables during VPN running */

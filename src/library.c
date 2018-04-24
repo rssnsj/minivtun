@@ -8,13 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <arpa/inet.h>
 #include <openssl/evp.h>
 #include <openssl/md5.h>
 
@@ -185,6 +183,26 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 
 	freeaddrinfo(result);
 	return 0;
+}
+
+int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr)
+{
+	int sockfd, rc;
+
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
+		return rc;
+
+	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		return -1;
+	}
+	if (connect(sockfd, (struct sockaddr *)peer_addr, sizeof_sockaddr(peer_addr)) < 0) {
+		close(sockfd);
+		return -EAGAIN;
+	}
+	set_nonblock(sockfd);
+
+	return sockfd;
 }
 
 void do_daemonize(void)

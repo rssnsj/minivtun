@@ -153,8 +153,8 @@ static void do_an_echo_request(void)
 	nmsg->hdr.opcode = MINIVTUN_MSG_ECHO_REQ;
 	nmsg->hdr.seq = htons(state.xmit_seq++);
 	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
-	nmsg->echo.loc_tun_in = config.local_tun_in;
-	nmsg->echo.loc_tun_in6 = config.local_tun_in6;
+	nmsg->echo.loc_tun_in = config.tun_in_local;
+	nmsg->echo.loc_tun_in6 = config.tun_in6_local;
 	nmsg->echo.id = r;
 
 	out_msg = crypt_buffer;
@@ -203,27 +203,6 @@ static bool do_link_health_assess(void)
 
 	/* FIXME: return an effective health state */
 	return true;
-}
-
-static int resolve_and_connect(const char *peer_addr_pair,
-		struct sockaddr_inx *peer_addr)
-{
-	int sockfd, rc;
-
-	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
-		return rc;
-
-	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
-		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
-		return -1;
-	}
-	if (connect(sockfd, (struct sockaddr *)peer_addr, sizeof_sockaddr(peer_addr)) < 0) {
-		close(sockfd);
-		return -EAGAIN;
-	}
-	set_nonblock(sockfd);
-
-	return sockfd;
 }
 
 int run_client(const char *peer_addr_pair)

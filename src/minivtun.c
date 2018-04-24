@@ -14,9 +14,6 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <fcntl.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 
 #include "minivtun.h"
 
@@ -273,7 +270,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "*** Invalid local IPv4 address: %s.\n", s_lip);
 			exit(1);
 		}
-		config.local_tun_in = vaddr;
+		config.tun_in_local = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
 			struct in_addr __network = { .s_addr = 0 };
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -323,7 +320,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "*** Invalid local IPv6 address: %s.\n", s_lip);
 			exit(1);
 		}
-		config.local_tun_in6 = vaddr;
+		config.tun_in6_local = vaddr;
 		if (!(sscanf(s_pfx, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen <= 128)) {
 			fprintf(stderr, "*** Not a legal prefix length: %s.\n", s_pfx);
 			exit(1);

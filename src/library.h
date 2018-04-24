@@ -86,6 +86,8 @@ static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 
 int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
 
+int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr);
+
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {
 	__u32 a = ntohl(in->s_addr);
