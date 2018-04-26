@@ -205,10 +205,10 @@ static bool do_link_health_assess(void)
 					loss, rtt);
 			fclose(fp);
 		}
+	} else {
+		syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
+				state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
 	}
-
-	syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
-			state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
 
 	reset_health_assess_data();
 
