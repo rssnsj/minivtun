@@ -20,6 +20,7 @@ struct minivtun_config {
 	unsigned tun_mtu;
 	const char *crypto_passwd;
 	const char *pid_file;
+	const char *health_file;
 	bool in_background;
 	bool wait_dns;
 
@@ -67,19 +68,19 @@ struct minivtun_msg {
 		__u8 rsv;
 		__be16 seq;
 		__u8 auth_key[16];
-	}  __attribute__((packed)) hdr;
+	} __attribute__((packed)) hdr; /* 20 */
 
 	union {
 		struct {
 			__be16 proto;   /* ETH_P_IP or ETH_P_IPV6 */
 			__be16 ip_dlen; /* Total length of IP/IPv6 data */
 			char data[NM_PI_BUFFER_SIZE];
-		} __attribute__((packed)) ipdata;
+		} __attribute__((packed)) ipdata;    /* 4+ */
 		struct {
 			struct in_addr loc_tun_in;
 			struct in6_addr loc_tun_in6;
 			__be32 id;
-		} __attribute__((packed)) echo;
+		} __attribute__((packed)) echo; /* 24 */
 	};
 } __attribute__((packed));
 

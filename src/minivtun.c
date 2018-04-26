@@ -26,6 +26,7 @@ struct minivtun_config config = {
 	.crypto_passwd = "",
 	.crypto_type = NULL,
 	.pid_file = NULL,
+	.health_file = NULL,
 	.in_background = false,
 	.wait_dns = false,
 };
@@ -34,57 +35,6 @@ struct state_variables state = {
 	.tunfd = -1,
 	.sockfd = -1,
 };
-
-static struct option long_opts[] = {
-	{ "local", required_argument, 0, 'l', },
-	{ "remote", required_argument, 0, 'r', },
-	{ "resolve", required_argument, 0, 'R', },
-	{ "ipv4-addr", required_argument, 0, 'a', },
-	{ "ipv6-addr", required_argument, 0, 'A', },
-	{ "mtu", required_argument, 0, 'm', },
-	{ "keepalive", required_argument, 0, 'k', },
-	{ "ifname", required_argument, 0, 'n', },
-	{ "pidfile", required_argument, 0, 'p', },
-	{ "key", required_argument, 0, 'e', },
-	{ "type", required_argument, 0, 't', },
-	{ "route", required_argument, 0, 'v', },
-	{ "daemon", no_argument, 0, 'd', },
-	{ "wait-dns", no_argument, 0, 'w', },
-	{ "help", no_argument, 0, 'h', },
-	{ 0, 0, 0, 0, },
-};
-
-static void print_help(int argc, char *argv[])
-{
-	int i;
-
-	printf("Mini virtual tunneller in non-standard protocol.\n");
-	printf("Usage:\n");
-	printf("  %s [options]\n", argv[0]);
-	printf("Options:\n");
-	printf("  -l, --local <ip:port>               local IP:port for server to listen\n");
-	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
-	printf("  -R, --resolve <host:port>           try to resolve a hostname\n");
-	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
-	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
-	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
-	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
-	printf("  -k, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
-	printf("  -n, --ifname <ifname>               virtual interface name\n");
-	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
-	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
-	printf("  -t, --type <encryption_type>        encryption type\n");
-	printf("  -v, --route <network/prefix=gateway>\n");
-	printf("                                      route a network to a client address, can be multiple\n");
-	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
-	printf("  -d, --daemon                        run as daemon process\n");
-	printf("  -h, --help                          print this help\n");
-	printf("Supported encryption types:\n");
-	printf("  ");
-	for (i = 0; cipher_pairs[i].name; i++)
-		printf("%s, ", cipher_pairs[i].name);
-	printf("\n");
-}
 
 static int tun_alloc(char *dev)
 {
@@ -176,6 +126,39 @@ static int try_resolve_addr_pair(const char *addr_pair)
 	return 0;
 }
 
+static void print_help(int argc, char *argv[])
+{
+	int i;
+
+	printf("Mini virtual tunneller in non-standard protocol.\n");
+	printf("Usage:\n");
+	printf("  %s [options]\n", argv[0]);
+	printf("Options:\n");
+	printf("  -l, --local <ip:port>               local IP:port for server to listen\n");
+	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
+	printf("  -R, --resolve <host:port>           try to resolve a hostname\n");
+	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
+	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
+	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
+	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
+	printf("  -k, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
+	printf("  -n, --ifname <ifname>               virtual interface name\n");
+	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
+	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
+	printf("  -t, --type <encryption_type>        encryption type\n");
+	printf("  -v, --route <network/prefix=gateway>\n");
+	printf("                                      route a network to a client address, can be multiple\n");
+	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
+	printf("      --health-file <file_path>       file for writing real-time health data.\n");
+	printf("  -d, --daemon                        run as daemon process\n");
+	printf("  -h, --help                          print this help\n");
+	printf("Supported encryption types:\n");
+	printf("  ");
+	for (i = 0; cipher_pairs[i].name; i++)
+		printf("%s, ", cipher_pairs[i].name);
+	printf("\n");
+}
+
 int main(int argc, char *argv[])
 {
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
@@ -184,9 +167,28 @@ int main(int argc, char *argv[])
 	char cmd[128];
 	int opt;
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:a:A:m:k:n:p:e:t:v:dwh",
-			long_opts, NULL)) != -1) {
+	static struct option long_opts[] = {
+		{ "local", required_argument, 0, 'l', },
+		{ "remote", required_argument, 0, 'r', },
+		{ "resolve", required_argument, 0, 'R', },
+		{ "health-file", required_argument, 0, 'H', },
+		{ "ipv4-addr", required_argument, 0, 'a', },
+		{ "ipv6-addr", required_argument, 0, 'A', },
+		{ "mtu", required_argument, 0, 'm', },
+		{ "keepalive", required_argument, 0, 'k', },
+		{ "ifname", required_argument, 0, 'n', },
+		{ "pidfile", required_argument, 0, 'p', },
+		{ "key", required_argument, 0, 'e', },
+		{ "type", required_argument, 0, 't', },
+		{ "route", required_argument, 0, 'v', },
+		{ "daemon", no_argument, 0, 'd', },
+		{ "wait-dns", no_argument, 0, 'w', },
+		{ "help", no_argument, 0, 'h', },
+		{ 0, 0, 0, 0, },
+	};
 
+	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:dwh",
+			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
 			loc_addr_pair = optarg;
@@ -196,6 +198,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'R':
 			exit(try_resolve_addr_pair(optarg));
+			break;
+		case 'H':
+			config.health_file = optarg;
 			break;
 		case 'a':
 			tun_ip_config = optarg;

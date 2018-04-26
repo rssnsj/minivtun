@@ -196,6 +196,17 @@ static bool do_link_health_assess(void)
 	unsigned rtt = state.total_echo_rcvd > 0 ?
 		(unsigned)(state.total_rtt_ms / state.total_echo_rcvd) : 0;
 
+	/* Write into file */
+	if (config.health_file) {
+		FILE *fp;
+		remove(config.health_file);
+		if ((fp = fopen(config.health_file, "w"))) {
+			fprintf(fp, "%u,%u,%u,%u\n", state.total_echo_sent, state.total_echo_rcvd,
+					loss, rtt);
+			fclose(fp);
+		}
+	}
+
 	syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
 			state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
 
@@ -215,7 +226,7 @@ int run_client(const char *peer_addr_pair)
 		/* DNS resolve OK, start service normally */
 		reset_state_on_reconnect();
 		inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
-				  s_peer_addr, sizeof(s_peer_addr));
+				s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunneling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.ifname);
 	} else if (state.sockfd == -EAGAIN && config.wait_dns) {
@@ -256,7 +267,7 @@ int run_client(const char *peer_addr_pair)
 
 		timeo = (struct timeval) { 1, 0 };
 		rc = select((state.tunfd > state.sockfd ? state.tunfd : state.sockfd) + 1,
-					&rset, NULL, NULL, &timeo);
+				&rset, NULL, NULL, &timeo);
 		if (rc < 0) {
 			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
 			return -1;
