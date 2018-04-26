@@ -102,6 +102,18 @@ static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 			((a0 & 0xff000000) != 0xff000000);
 }
 
+static inline bool in_addr_prefix_match(
+		const struct in_addr *network, int prefix,
+		const struct in_addr *addr)
+{
+	if (prefix == 32) {
+		return addr->s_addr == network->s_addr;
+	} else {
+		return ntohl(network->s_addr) ==
+			(ntohl(addr->s_addr) & ~((1U << (32 - prefix)) - 1));
+	}
+}
+
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
 #if defined(__APPLE__) || defined(__FreeBSD__)

@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/time.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -80,35 +81,109 @@ static int tun_alloc(char *dev)
 	return fd;
 }
 
+static void vt_route_add(short af, void *n, int prefix, void *g)
+{
+	union {
+		struct in_addr in;
+		struct in6_addr in6;
+	} *network = n, *gateway = g;
+	struct vt_route *rt;
+
+	rt = malloc(sizeof(struct vt_route));
+	memset(rt, 0x0, sizeof(*rt));
+
+	rt->af = af;
+	rt->prefix = prefix;
+	if (af == AF_INET) {
+		rt->network.in = network->in;
+		rt->network.in.s_addr &= htonl(
+			prefix ? (~((1U << (32 - prefix)) - 1) & 0xffffffff) : 0);
+		rt->gateway.in = gateway->in;
+	}
+	else if (af == AF_INET6) {
+		int i;
+		rt->network.in6 = network->in6;
+		if (prefix < 128) {
+			rt->network.in6.s6_addr[prefix / 8] &= ~((1U << (8 - prefix % 8)) - 1);
+			for (i = prefix / 8 + 1; i < 16; i++)
+				rt->network.in6.s6_addr[i] &= 0x00;
+		}
+		rt->gateway.in6 = gateway->in6;
+	}
+	else {
+		assert(0);
+	}
+
+	/* Append to the list */
+	rt->next = config.vt_routes;
+	config.vt_routes = rt;
+}
+
 static void parse_virtual_route(const char *arg)
 {
 	char expr[80], *net, *pfx, *gw;
-	struct in_addr network, gateway;
-	unsigned prefix = 0;
+	short af = 0;
+	int prefix = -1;
+	union {
+		struct in_addr in;
+		struct in6_addr in6;
+	} network, gateway;
 
 	strncpy(expr, arg, sizeof(expr));
 	expr[sizeof(expr) - 1] = '\0';
 
-	/* 192.168.0.0/16=10.7.0.1 */
+	/* Has gateway or not */
+	if ((gw = strchr(expr, '=')))
+		*(gw++) = '\0';
+
+	/* Network or single IP/IPv6 address */
 	net = expr;
-	if ((pfx = strchr(net, '/')) == NULL) {
-		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
-		exit(1);
+	if ((pfx = strchr(net, '/'))) {
+		*(pfx++) = '\0';
+		prefix = strtol(pfx, NULL, 10);
+		if (errno != ERANGE && prefix >= 0 && prefix <= 32 &&
+			inet_pton(AF_INET, net, &network)) {
+			/* 192.168.0.0/16=10.7.7.1 */
+			af = AF_INET;
+		}
+		else if (errno != ERANGE && prefix >= 0 && prefix <= 128 &&
+			inet_pton(AF_INET6, net, &network)) {
+			/* 2001:470:f9f2:ffff::/64=2001:470:f9f2::1 */
+			af = AF_INET6;
+		}
+		else {
+			fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+			exit(1);
+		}
 	}
-	*(pfx++) = '\0';
-	if ((gw = strchr(pfx, '=')) == NULL) {
-		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
-		exit(1);
+	else {
+		if (inet_pton(AF_INET, net, &network)) {
+			/* 192.168.0.1=10.7.7.1 */
+			af = AF_INET;
+			prefix = 32;
+		}
+		else if (inet_pton(AF_INET6, net, &network)) {
+			/* 2001:470:f9f2:ffff::1=2001:470:f9f2::1 */
+			af = AF_INET6;
+			prefix = 128;
+		}
+		else {
+			fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+			exit(1);
+		}
 	}
-	*(gw++) = '\0';
 
-	if (!inet_pton(AF_INET, net, &network) ||
-		!inet_pton(AF_INET, gw, &gateway) || sscanf(pfx, "%u", &prefix) != 1) {
-		fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
-		exit(1);
+	/* Has gateway or not */
+	if (gw) {
+		if (!inet_pton(af, gw, &gateway)) {
+			fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
+			exit(1);
+		}
+	} else {
+		memset(&gateway, 0x0, sizeof(gateway));
 	}
 
-	vt_route_add(&network, prefix, &gateway);
+	vt_route_add(af, &network, prefix, &gateway);
 }
 
 static int try_resolve_addr_pair(const char *addr_pair)
@@ -283,7 +358,7 @@ int main(int argc, char *argv[])
 #else
 			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.ifname, s_lip, s_rip);
 #endif
-			vt_route_add(&__network, 0, &vaddr);
+			vt_route_add(AF_INET, &__network, 0, &vaddr);
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
 			__u32 mask = ~((1 << (32 - pfxlen)) - 1);
 #if defined(__APPLE__) || defined(__FreeBSD__)

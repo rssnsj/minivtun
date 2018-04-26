@@ -12,6 +12,20 @@
 extern struct minivtun_config config;
 extern struct state_variables state;
 
+/**
+* Pseudo route table for binding client side subnets
+* to corresponding connected virtual addresses.
+*/
+struct vt_route {
+	struct vt_route *next;
+	short af;
+	union {
+		struct in_addr in;
+		struct in6_addr in6;
+	} network, gateway;
+	int prefix;
+};
+
 struct minivtun_config {
 	unsigned reconnect_timeo;
 	unsigned keepalive_timeo;
@@ -28,6 +42,11 @@ struct minivtun_config {
 	const void *crypto_type;
 	struct in_addr tun_in_local;
 	struct in6_addr tun_in6_local;
+
+	/* Static routes attached to this link when brought up */
+	struct vt_route *vt_routes;
+	int vt_metric;
+	char vt_table[32];
 };
 
 /* Status variables during VPN running */
@@ -108,7 +127,6 @@ static inline void netmsg_to_local(void *in, void **out, size_t *dlen)
 
 int run_client(const char *peer_addr_pair);
 int run_server(const char *loc_addr_pair);
-int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway);
 
 #endif /* __MINIVTUN_H */
 

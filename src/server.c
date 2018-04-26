@@ -22,52 +22,24 @@
 
 static __u32 hash_initval = 0;
 
-/**
- * Pseudo route table for binding client side subnets
- * to corresponding connected virtual addresses.
- */
-struct vt_route {
-	struct in_addr network;
-	struct in_addr netmask;
-	struct in_addr gateway;
-};
-#define VIRTUAL_ROUTE_MAX  (32)
-static struct vt_route *vt_routes[VIRTUAL_ROUTE_MAX];
-static unsigned vt_routes_len = 0; 
-
-int vt_route_add(struct in_addr *network, unsigned prefix, struct in_addr *gateway)
+static void *vt_route_lookup(short af, const void *a)
 {
+	const union {
+		struct in_addr in;
+		struct in6_addr in6;
+	} *addr = a;
 	struct vt_route *rt;
-	__u32 mask;
 
-	if (prefix == 0) {
-		mask = 0;
-	} else {
-		mask = ~((1U << (32 - prefix)) - 1) & 0xffffffff;
-	}
-
-	if (vt_routes_len >= VIRTUAL_ROUTE_MAX) {
-		syslog(LOG_ERR, "*** Virtual route table is full.\n");
-		return -1;
-	}
-
-	rt = malloc(sizeof(struct vt_route));
-	rt->netmask.s_addr = htonl(mask);
-	rt->network.s_addr = network->s_addr & rt->netmask.s_addr;
-	rt->gateway = *gateway;
-	vt_routes[vt_routes_len++] = rt;
-
-	return 0;
-}
-
-static struct in_addr *vt_route_lookup(const struct in_addr *addr)
-{
-	unsigned i;
-
-	for (i = 0; i < vt_routes_len; i++) {
-		struct vt_route *rt = vt_routes[i];
-		if ((addr->s_addr & rt->netmask.s_addr) == rt->network.s_addr)
-			return &rt->gateway;
+	for (rt = config.vt_routes; rt; rt = rt->next) {
+		if (rt->af != af)
+			continue;
+		if (af == AF_INET) {
+			if (in_addr_prefix_match(&rt->network.in,
+				rt->prefix, &addr->in))
+				return &rt->gateway.in;
+		} else if (af == AF_INET6) {
+			/* FIXME: Unsupported yet */
+		}
 	}
 
 	return NULL;
@@ -572,28 +544,28 @@ static int tunnel_receiving(void)
 		 * Not an existing client address, lookup the pseudo
 		 * route table for a destination to send.
 		 */
-		if (virt_addr.af == AF_INET) {
-			struct in_addr *gw;
-			struct tun_addr __virt_addr;
+		void *gw;
+		struct tun_addr __va;
 
-			/* Lookup the gateway virtual address first. */
-			if ((gw = vt_route_lookup(&virt_addr.in)) == NULL)
-				return 0;
-
-			/* Then get the gateway client entry. */
-			memset(&__virt_addr, 0x0, sizeof(__virt_addr));
-			__virt_addr.af = AF_INET;
-			__virt_addr.in = *gw;
-			if ((ce = tun_client_try_get(&__virt_addr)) == NULL)
-				return 0;
-
-			/* Finally, create the client entry. */
-			if ((ce = tun_client_get_or_create(&virt_addr,
-				&ce->ra->real_addr)) == NULL)
-				return 0;
-		} else {
+		/* Lookup the gateway virtual address first. */
+		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in)) == NULL)
 			return 0;
+
+		/* Then get the gateway client entry. */
+		memset(&__va, 0x0, sizeof(__va));
+		__va.af = virt_addr.af;
+		if (virt_addr.af == AF_INET) {
+			__va.in = *(struct in_addr *)gw;
+		} else {
+			__va.in6 = *(struct in6_addr *)gw;
 		}
+		if ((ce = tun_client_try_get(&__va)) == NULL)
+			return 0;
+
+		/* Finally, create the client entry. */
+		if ((ce = tun_client_get_or_create(&virt_addr,
+			&ce->ra->real_addr)) == NULL)
+			return 0;
 	}
 
 	memset(&nmsg.hdr, 0x0, sizeof(nmsg.hdr));
