@@ -43,10 +43,13 @@ struct minivtun_config {
 	struct in_addr tun_in_local;
 	struct in6_addr tun_in6_local;
 
-	/* Static routes attached to this link when brought up */
+	/* Dynamic routes for client, or virtual routes for server */
 	struct vt_route *vt_routes;
+
+	/* Client only configuration */
 	int vt_metric;
 	char vt_table[32];
+	bool dynamic_link;
 };
 
 /* Status variables during VPN running */
@@ -66,6 +69,7 @@ struct state_variables {
 	unsigned total_echo_sent;
 	unsigned total_echo_rcvd;
 	unsigned long total_rtt_ms;
+	bool is_link_ok;
 
 	/* *** Server specific *** */
 	struct sockaddr_inx local_addr;

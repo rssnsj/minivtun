@@ -30,6 +30,7 @@ struct minivtun_config config = {
 	.health_file = NULL,
 	.in_background = false,
 	.wait_dns = false,
+	.dynamic_link = false,
 };
 
 struct state_variables state = {
@@ -213,13 +214,15 @@ static void print_help(int argc, char *argv[])
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
 	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
 	printf("  -t, --type <encryption_type>        encryption type\n");
-	printf("  -v, --route <network/prefix=gateway>\n");
-	printf("                                      route a network to a client address, can be multiple\n");
+	printf("  -v, --route <network/prefix>[=gw]   attached IPv4/IPv6 route on this link, can be multiple\n");
+	printf("  -M, --metric <metric>               metric of attached IPv4 routes\n");
+	printf("  -T, --table <table_name>            route table of the attached IPv4 routes\n");
+	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("      --health-file <file_path>       file for writing real-time health data.\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
-	printf("Supported encryption types:\n");
+	printf("Supported encryption algorithms:\n");
 	printf("  ");
 	for (i = 0; cipher_pairs[i].name; i++)
 		printf("%s, ", cipher_pairs[i].name);
@@ -248,13 +251,16 @@ int main(int argc, char *argv[])
 		{ "key", required_argument, 0, 'e', },
 		{ "type", required_argument, 0, 't', },
 		{ "route", required_argument, 0, 'v', },
+		{ "metric", required_argument, 0, 'M', },
+		{ "table", required_argument, 0, 'T', },
+		{ "dynamic-link", no_argument, 0, 'D', },
 		{ "daemon", no_argument, 0, 'd', },
 		{ "wait-dns", no_argument, 0, 'w', },
 		{ "help", no_argument, 0, 'h', },
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:dwh",
+	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:Ddwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -296,6 +302,16 @@ int main(int argc, char *argv[])
 			break;
 		case 'v':
 			parse_virtual_route(optarg);
+			break;
+		case 'M':
+			config.vt_metric = strtol(optarg, NULL, 0);
+			break;
+		case 'T':
+			strncpy(config.vt_table, optarg, sizeof(config.vt_table));
+			config.vt_table[sizeof(config.vt_table) - 1] = '\0';
+			break;
+		case 'D':
+			config.dynamic_link = true;
 			break;
 		case 'd':
 			config.in_background = true;
@@ -344,29 +360,28 @@ int main(int argc, char *argv[])
 		}
 		config.tun_in_local = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
-			struct in_addr __network = { .s_addr = 0 };
 #if defined(__APPLE__) || defined(__FreeBSD__)
 			sprintf(cmd, "ifconfig %s %s %s", config.ifname, s_lip, s_rip);
 #else
-			sprintf(cmd, "ifconfig %s %s pointopoint %s", config.ifname, s_lip, s_rip);
+			sprintf(cmd, "ip addr add %s peer %s dev %s", s_lip, s_rip, config.ifname);
 #endif
-			vt_route_add(AF_INET, &__network, 0, &vaddr);
+			/* Route all packets to peer when server is configured in P-t-P mode */
+			if (loc_addr_pair) {
+				struct in_addr nz = { .s_addr = 0 };
+				vt_route_add(AF_INET, &nz, 0, &vaddr);
+			}
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
-			__u32 mask = ~((1 << (32 - pfxlen)) - 1);
 #if defined(__APPLE__) || defined(__FreeBSD__)
-			__u32 network = ntohl(vaddr.s_addr) & mask;
-			sprintf(s_rip, "%u.%u.%u.%u", network >> 24, (network >> 16) & 0xff,
-					(network >> 8) & 0xff, network & 0xff);
+			__u32 m = ~((1 << (32 - pfxlen)) - 1);
+			__u32 n = ntohl(vaddr.s_addr) & m;
+			sprintf(s_rip, "%u.%u.%u.%u", n >> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
 			sprintf(cmd, "ifconfig %s %s %s && route add -net %s/%d %s >/dev/null",
 					config.ifname, s_lip, s_lip, s_rip, pfxlen, s_lip);
 #else
-			sprintf(s_rip, "%u.%u.%u.%u", mask >> 24, (mask >> 16) & 0xff,
-					(mask >> 8) & 0xff, mask & 0xff);
-			sprintf(cmd, "ifconfig %s %s netmask %s", config.ifname, s_lip, s_rip);
+			sprintf(cmd, "ip addr add %s/%d dev %s", s_lip, pfxlen, config.ifname);
 #endif
 		} else {
-			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n",
-					s_rip);
+			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n", s_rip);
 			exit(1);
 		}
 		(void)system(cmd);
@@ -401,13 +416,19 @@ int main(int argc, char *argv[])
 #if defined(__APPLE__) || defined(__FreeBSD__)
 		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.ifname, s_lip, pfxlen);
 #else
-		sprintf(cmd, "ifconfig %s add %s/%d", config.ifname, s_lip, pfxlen);
+		sprintf(cmd, "ip -6 addr add %s/%d dev %s", s_lip, pfxlen, config.ifname);
 #endif
 		(void)system(cmd);
 	}
 
 	/* Always bring it up with proper MTU size. */
-	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up", config.ifname, config.tun_mtu, config.ifname);
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up",
+			config.ifname, config.tun_mtu, config.ifname);
+#else
+	sprintf(cmd, "ip link set dev %s mtu %u; ip link set %s up",
+			config.ifname, config.tun_mtu, config.ifname);
+#endif
 	(void)system(cmd);
 
 	if (enabled_encryption()) {
