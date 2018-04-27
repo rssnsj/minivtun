@@ -20,7 +20,7 @@
 
 struct minivtun_config config = {
 	.keepalive_timeo = 7,
-	.reconnect_timeo = 30,
+	.reconnect_timeo = 45,
 	.health_assess_timeo = 100,
 	.ifname = "",
 	.tun_mtu = 1300,
@@ -37,50 +37,6 @@ struct state_variables state = {
 	.tunfd = -1,
 	.sockfd = -1,
 };
-
-static int tun_alloc(char *dev)
-{
-	int fd = -1, err;
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	int b_enable = 1, i;
-
-	for (i = 0; i < 8; i++) {
-		char dev_path[20];
-		sprintf(dev_path, "/dev/tun%d", i);
-		if ((fd = open(dev_path, O_RDWR)) >= 0) {
-			sprintf(dev, "tun%d", i);
-			break;
-		}
-	}
-	if (fd < 0)
-		return -EINVAL;
-
-	if ((err = ioctl(fd, TUNSIFHEAD, &b_enable)) < 0) {
-		close(fd);
-		return err;
-	}
-#else
-	struct ifreq ifr;
-
-	if ((fd = open("/dev/net/tun", O_RDWR)) >= 0) {
-	} else if ((fd = open("/dev/tun", O_RDWR)) >= 0) {
-	} else {
-		return -EINVAL;
-	}
-
-	memset(&ifr, 0, sizeof(ifr));
-	ifr.ifr_flags = IFF_TUN;
-	if (dev[0])
-		strncpy(ifr.ifr_name, dev, IFNAMSIZ);
-	if ((err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0) {
-		close(fd);
-		return err;
-	}
-	strcpy(dev, ifr.ifr_name);
-#endif
-
-	return fd;
-}
 
 static void vt_route_add(short af, void *n, int prefix, void *g)
 {
@@ -234,7 +190,6 @@ int main(int argc, char *argv[])
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
-	char cmd[128];
 	int opt;
 
 	static struct option long_opts[] = {
@@ -360,31 +315,19 @@ int main(int argc, char *argv[])
 		}
 		config.tun_in_local = vaddr;
 		if (inet_pton(AF_INET, s_rip, &vaddr)) {
-#if defined(__APPLE__) || defined(__FreeBSD__)
-			sprintf(cmd, "ifconfig %s %s %s", config.ifname, s_lip, s_rip);
-#else
-			sprintf(cmd, "ip addr add %s peer %s dev %s", s_lip, s_rip, config.ifname);
-#endif
-			/* Route all packets to peer when server is configured in P-t-P mode */
 			if (loc_addr_pair) {
 				struct in_addr nz = { .s_addr = 0 };
 				vt_route_add(AF_INET, &nz, 0, &vaddr);
 			}
+			config.tun_in_peer = vaddr;
 		} else if (sscanf(s_rip, "%d", &pfxlen) == 1 && pfxlen > 0 && pfxlen < 31 ) {
-#if defined(__APPLE__) || defined(__FreeBSD__)
-			__u32 m = ~((1 << (32 - pfxlen)) - 1);
-			__u32 n = ntohl(vaddr.s_addr) & m;
-			sprintf(s_rip, "%u.%u.%u.%u", n >> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
-			sprintf(cmd, "ifconfig %s %s %s && route add -net %s/%d %s >/dev/null",
-					config.ifname, s_lip, s_lip, s_rip, pfxlen, s_lip);
-#else
-			sprintf(cmd, "ip addr add %s/%d dev %s", s_lip, pfxlen, config.ifname);
-#endif
+			config.tun_in_prefix = pfxlen;
 		} else {
 			fprintf(stderr, "*** Not a legal netmask or prefix length: %s.\n", s_rip);
 			exit(1);
 		}
-		(void)system(cmd);
+		ip_addr_add_ipv4(config.ifname, &config.tun_in_local,
+				&config.tun_in_peer, config.tun_in_prefix);
 	}
 
 	/* Configure IPv6 address if set. */
@@ -412,24 +355,14 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "*** Not a legal prefix length: %s.\n", s_pfx);
 			exit(1);
 		}
+		config.tun_in6_prefix = pfxlen;
 
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "ifconfig %s inet6 %s/%d", config.ifname, s_lip, pfxlen);
-#else
-		sprintf(cmd, "ip -6 addr add %s/%d dev %s", s_lip, pfxlen, config.ifname);
-#endif
-		(void)system(cmd);
+		ip_addr_add_ipv6(config.ifname, &config.tun_in6_local, config.tun_in6_prefix);
 	}
 
 	/* Always bring it up with proper MTU size. */
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "ifconfig %s mtu %u; ifconfig %s up",
-			config.ifname, config.tun_mtu, config.ifname);
-#else
-	sprintf(cmd, "ip link set dev %s mtu %u; ip link set %s up",
-			config.ifname, config.tun_mtu, config.ifname);
-#endif
-	(void)system(cmd);
+	ip_link_set_mtu(config.ifname, config.tun_mtu);
+	ip_link_set_updown(config.ifname, true);
 
 	if (enabled_encryption()) {
 		fill_with_string_md5sum(config.crypto_passwd, config.crypto_key, CRYPTO_MAX_KEY_SIZE);

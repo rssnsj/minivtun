@@ -40,8 +40,15 @@ struct minivtun_config {
 
 	char crypto_key[CRYPTO_MAX_KEY_SIZE];
 	const void *crypto_type;
+
+	/* IPv4 address settings */
 	struct in_addr tun_in_local;
+	struct in_addr tun_in_peer;
+	int tun_in_prefix;
+
+	/* IPv6 address settings */
 	struct in6_addr tun_in6_local;
+	int tun_in6_prefix;
 
 	/* Dynamic routes for client, or virtual routes for server */
 	struct vt_route *vt_routes;

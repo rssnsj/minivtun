@@ -20,49 +20,32 @@
 
 static void handle_link_up(void)
 {
-	char cmd[256];
 	struct vt_route *rt;
 
 	syslog(LOG_INFO, "Link is up.\n");
 
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "ifconfig %s up", config.ifname);
-#else
-	sprintf(cmd, "ip link set %s up", config.ifname);
-#endif
-	(void)system(cmd);
+	ip_link_set_updown(config.ifname, true);
+
+	/* Add IPv4 address if possible */
+	ip_addr_add_ipv4(config.ifname, &config.tun_in_local,
+			&config.tun_in_peer, config.tun_in_prefix);
+
+	/* Add IPv6 address if possible */
+	ip_addr_add_ipv6(config.ifname, &config.tun_in6_local,
+			config.tun_in6_prefix);
 
 	/* Attach the dynamic routes */
 	for (rt = config.vt_routes; rt; rt = rt->next) {
-		char __net[64] = "", __ip_sfx[40] = "";
-		inet_ntop(rt->af, &rt->network, __net, sizeof(__net));
-		if (config.vt_table[0])
-			sprintf(__ip_sfx, " table %s", config.vt_table);
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "%s add -net %s/%d %s metric %d",
-				rt->af == AF_INET6 ? "route -A inet6" : "route",
-				__net, rt->prefix, config.ifname, config.vt_metric);
-#else
-		sprintf(cmd, "%s route add %s/%d dev %s metric %d%s",
-				rt->af == AF_INET6 ? "ip -6" : "ip", __net, rt->prefix,
-				config.ifname, config.vt_metric, __ip_sfx);
-#endif
-		(void)system(cmd);
+		ip_route_add_ipvx(config.ifname, rt->af, &rt->network, rt->prefix,
+			config.vt_metric, config.vt_table[0] ? config.vt_table : NULL);
 	}
 }
 
 static void handle_link_down(void)
 {
-	char cmd[128];
-
 	syslog(LOG_INFO, "Link is down.\n");
 
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "ifconfig %s down", config.ifname);
-#else
-	sprintf(cmd, "ip link set %s down", config.ifname);
-#endif
-	(void)system(cmd);
+	ip_link_set_updown(config.ifname, false);
 }
 
 static int network_receiving(void)
@@ -278,15 +261,8 @@ int run_client(const char *peer_addr_pair)
 
 	/* Dynamic link mode */
 	state.is_link_ok = false;
-	if (config.dynamic_link) {
-		char cmd[128];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "ifconfig %s down", config.ifname);
-#else
-		sprintf(cmd, "ip link set %s down", config.ifname);
-#endif
-		(void)system(cmd);
-	}
+	if (config.dynamic_link)
+		ip_link_set_updown(config.ifname, false);
 
 	if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
 		/* DNS resolve OK, start service normally */
