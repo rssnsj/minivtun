@@ -96,21 +96,18 @@ static void vt_route_add(short af, void *n, int prefix, void *g)
 	rt->prefix = prefix;
 	if (af == AF_INET) {
 		rt->network.in = network->in;
-		rt->network.in.s_addr &= htonl(
-			prefix ? (~((1U << (32 - prefix)) - 1) & 0xffffffff) : 0);
+		rt->network.in.s_addr &= prefix ? htonl(~((1 << (32 - prefix)) - 1)) : 0;
 		rt->gateway.in = gateway->in;
-	}
-	else if (af == AF_INET6) {
+	} else if (af == AF_INET6) {
 		int i;
 		rt->network.in6 = network->in6;
 		if (prefix < 128) {
-			rt->network.in6.s6_addr[prefix / 8] &= ~((1U << (8 - prefix % 8)) - 1);
+			rt->network.in6.s6_addr[prefix / 8] &= ~((1 << (8 - prefix % 8)) - 1);
 			for (i = prefix / 8 + 1; i < 16; i++)
 				rt->network.in6.s6_addr[i] &= 0x00;
 		}
 		rt->gateway.in6 = gateway->in6;
-	}
-	else {
+	} else {
 		assert(0);
 	}
 
@@ -145,29 +142,24 @@ static void parse_virtual_route(const char *arg)
 			inet_pton(AF_INET, net, &network)) {
 			/* 192.168.0.0/16=10.7.7.1 */
 			af = AF_INET;
-		}
-		else if (errno != ERANGE && prefix >= 0 && prefix <= 128 &&
+		} else if (errno != ERANGE && prefix >= 0 && prefix <= 128 &&
 			inet_pton(AF_INET6, net, &network)) {
 			/* 2001:470:f9f2:ffff::/64=2001:470:f9f2::1 */
 			af = AF_INET6;
-		}
-		else {
+		} else {
 			fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
 			exit(1);
 		}
-	}
-	else {
+	} else {
 		if (inet_pton(AF_INET, net, &network)) {
 			/* 192.168.0.1=10.7.7.1 */
 			af = AF_INET;
 			prefix = 32;
-		}
-		else if (inet_pton(AF_INET6, net, &network)) {
+		} else if (inet_pton(AF_INET6, net, &network)) {
 			/* 2001:470:f9f2:ffff::1=2001:470:f9f2::1 */
 			af = AF_INET6;
 			prefix = 128;
-		}
-		else {
+		} else {
 			fprintf(stderr, "*** Not a valid route expression '%s'.\n", arg);
 			exit(1);
 		}

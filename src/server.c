@@ -34,11 +34,26 @@ static void *vt_route_lookup(short af, const void *a)
 		if (rt->af != af)
 			continue;
 		if (af == AF_INET) {
-			if (in_addr_prefix_match(&rt->network.in,
-				rt->prefix, &addr->in))
+			if (rt->prefix == 0) {
 				return &rt->gateway.in;
+			} else {
+				in_addr_t m = rt->prefix ? htonl(~((1 << (32 - rt->prefix)) - 1)) : 0;
+				if ((addr->in.s_addr & m) == rt->network.in.s_addr)
+					return &rt->gateway.in;
+			}
 		} else if (af == AF_INET6) {
-			/* FIXME: Unsupported yet */
+			if (rt->prefix == 0) {
+				return &rt->gateway.in6;
+			} else if (rt->prefix < 128) {
+				struct in6_addr n = addr->in6;
+				int i;
+				n.s6_addr[rt->prefix / 8] &= ~((1 << (8 - rt->prefix % 8)) - 1);
+				for (i = rt->prefix / 8 + 1; i < 16; i++)
+					n.s6_addr[i] &= 0x00;
+				if (is_in6_equal(&n, &rt->network.in6))
+					return &rt->gateway.in6;
+			}
+
 		}
 	}
 
@@ -547,11 +562,11 @@ static int tunnel_receiving(void)
 		void *gw;
 		struct tun_addr __va;
 
-		/* Lookup the gateway virtual address first. */
+		/* Lookup the gateway address first */
 		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in)) == NULL)
 			return 0;
 
-		/* Then get the gateway client entry. */
+		/* Then find the gateway client entry */
 		memset(&__va, 0x0, sizeof(__va));
 		__va.af = virt_addr.af;
 		if (virt_addr.af == AF_INET) {
@@ -562,7 +577,7 @@ static int tunnel_receiving(void)
 		if ((ce = tun_client_try_get(&__va)) == NULL)
 			return 0;
 
-		/* Finally, create the client entry. */
+		/* Finally, create a client entry with this address */
 		if ((ce = tun_client_get_or_create(&virt_addr,
 			&ce->ra->real_addr)) == NULL)
 			return 0;
