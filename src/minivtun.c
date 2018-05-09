@@ -11,7 +11,6 @@
 #include <getopt.h>
 #include <errno.h>
 #include <assert.h>
-#include <sys/time.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -360,7 +359,7 @@ int main(int argc, char *argv[])
 		ip_addr_add_ipv6(config.ifname, &config.tun_in6_local, config.tun_in6_prefix);
 	}
 
-	/* Always bring it up with proper MTU size. */
+	/* Set proper MTU size, and link up */
 	ip_link_set_mtu(config.ifname, config.tun_mtu);
 	ip_link_set_updown(config.ifname, true);
 
