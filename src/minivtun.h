@@ -69,6 +69,7 @@ struct state_variables {
 	__u16 xmit_seq;
 	struct timeval last_recv;
 	struct timeval last_echo_sent;
+	struct timeval last_echo_recv;
 	struct timeval last_health_assess;
 	bool has_pending_echo;
 	__be32 pending_echo_id;

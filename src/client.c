@@ -121,6 +121,7 @@ static int network_receiving(void)
 		break;
 	case MINIVTUN_MSG_ECHO_ACK:
 		if (state.has_pending_echo && nmsg->echo.id == state.pending_echo_id) {
+			state.last_echo_recv = __current;
 			state.total_echo_rcvd++;
 			state.total_rtt_ms += __sub_timeval_ms(&__current, &state.last_echo_sent);
 			state.has_pending_echo = false;
@@ -221,6 +222,7 @@ static void reset_state_on_reconnect(void)
 	gettimeofday(&__current, NULL);
 	state.xmit_seq = (__u16)rand();
 	state.last_recv = __current;
+	state.last_echo_recv = __current;
 	state.last_echo_sent = (struct timeval) { 0, 0 }; /* trigger the first echo */
 	state.last_health_assess = __current;
 	reset_health_assess_data();
@@ -318,10 +320,12 @@ int run_client(const char *peer_addr_pair)
 		gettimeofday(&__current, NULL);
 
 		/* Date corruption check */
-		if (timercmp(&state.last_echo_sent, &__current, >))
-			state.last_echo_sent = __current;
 		if (timercmp(&state.last_recv, &__current, >))
 			state.last_recv = __current;
+		if (timercmp(&state.last_echo_sent, &__current, >))
+			state.last_echo_sent = __current;
+		if (timercmp(&state.last_echo_recv, &__current, >))
+			state.last_echo_recv = __current;
 
 		/* Calculate packet loss and RTT for a link health assess */
 		if (__sub_timeval_ms(&__current, &state.last_health_assess) >=
@@ -339,7 +343,7 @@ int run_client(const char *peer_addr_pair)
 		}
 
 		/* Connection timed out, try to reconnect */
-		if (state.sockfd < 0 || __sub_timeval_ms(&__current, &state.last_recv)
+		if (state.sockfd < 0 || __sub_timeval_ms(&__current, &state.last_echo_recv)
 				>= config.reconnect_timeo * 1000) {
 reconnect:
 			/* Call link-down scripts */
