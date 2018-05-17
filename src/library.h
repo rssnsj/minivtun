@@ -8,18 +8,20 @@
 #define __LIBRARY_H
 
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stddef.h>
-#include <netdb.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 
-#define __be32 uint32_t
-#define __be16 uint16_t
-#define __u32 uint32_t
-#define __u16 uint16_t
-#define __u8 uint8_t
+typedef uint32_t __be32;
+typedef uint16_t __be16;
+typedef uint32_t __u32;
+typedef uint16_t __u16;
+typedef uint8_t __u8;
 
-#define bool char
+typedef char bool;
 #define true 1
 #define false 0
 
@@ -83,17 +85,27 @@ static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 }
 
 int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
+int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr);
+int tun_alloc(char *dev);
+
+void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
+		struct in_addr *peer, int prefix);
+void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix);
+void ip_link_set_mtu(const char *ifname, unsigned mtu);
+void ip_link_set_updown(const char *ifname, bool up);
+void ip_route_add_ipvx(const char *ifname, int af, void *network, int prefix,
+		int metric, const char *table);
 
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {
-	uint32_t a = ntohl(in->s_addr);
+	__u32 a = ntohl(in->s_addr);
 	return  ((a & 0xff000000) != 0x00000000) &&
 			((a & 0xf0000000) != 0xe0000000);
 }
 
 static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 {
-	uint32_t a0 = ntohl(((__be32 *)in6)[0]);
+	__u32 a0 = ntohl(((__be32 *)in6)[0]);
 	return  ((a0 & 0xff000000) != 0x00000000) &&
 			((a0 & 0xff000000) != 0xff000000);
 }
@@ -162,6 +174,17 @@ void datagram_decrypt(const void *key, const void *cptype, void *in,
 void fill_with_string_md5sum(const char *in, void *out, size_t outlen);
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+
+static inline long __sub_timeval_ms(const struct timeval *a,
+		const struct timeval *b)
+{
+	long secs = a->tv_sec - b->tv_sec;
+	if (secs > 1000000)
+		return 1000000000;
+	if (secs < -1000000)
+		return -1000000000;
+	return secs * 1000 + (a->tv_usec - b->tv_usec) / 1000;
+}
 
 static inline int set_nonblock(int sockfd)
 {

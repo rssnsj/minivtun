@@ -8,13 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <arpa/inet.h>
 #include <openssl/evp.h>
 #include <openssl/md5.h>
 
@@ -185,6 +183,161 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 
 	freeaddrinfo(result);
 	return 0;
+}
+
+int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr)
+{
+	int sockfd, rc;
+
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
+		return rc;
+
+	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+		fprintf(stderr, "*** socket() failed: %s.\n", strerror(errno));
+		return -1;
+	}
+	if (connect(sockfd, (struct sockaddr *)peer_addr, sizeof_sockaddr(peer_addr)) < 0) {
+		close(sockfd);
+		return -EAGAIN;
+	}
+	set_nonblock(sockfd);
+
+	return sockfd;
+}
+
+int tun_alloc(char *dev)
+{
+	int fd = -1, err;
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	int b_enable = 1, i;
+
+	for (i = 0; i < 8; i++) {
+		char dev_path[20];
+		sprintf(dev_path, "/dev/tun%d", i);
+		if ((fd = open(dev_path, O_RDWR)) >= 0) {
+			sprintf(dev, "tun%d", i);
+			break;
+		}
+	}
+	if (fd < 0)
+		return -EINVAL;
+	if ((err = ioctl(fd, TUNSIFHEAD, &b_enable)) < 0) {
+		close(fd);
+		return err;
+	}
+#else
+	struct ifreq ifr;
+
+	if ((fd = open("/dev/net/tun", O_RDWR)) >= 0) {
+	} else if ((fd = open("/dev/tun", O_RDWR)) >= 0) {
+	} else {
+		return -EINVAL;
+	}
+
+	memset(&ifr, 0, sizeof(ifr));
+	ifr.ifr_flags = IFF_TUN;
+	if (dev[0])
+		strncpy(ifr.ifr_name, dev, IFNAMSIZ);
+	if ((err = ioctl(fd, TUNSETIFF, (void *)&ifr)) < 0) {
+		close(fd);
+		return err;
+	}
+	strcpy(dev, ifr.ifr_name);
+#endif
+
+	return fd;
+}
+
+void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
+		struct in_addr *peer, int prefix)
+{
+	char cmd[128];
+	if (is_valid_unicast_in(local) && is_valid_unicast_in(peer)) {
+		char s1[64], s2[64];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+		sprintf(cmd, "ifconfig %s %s %s 2>/dev/null", ifname,
+				inet_ntop(AF_INET, local, s1, sizeof(s1)),
+				inet_ntop(AF_INET, peer, s2, sizeof(s2)));
+#else
+		sprintf(cmd, "ip addr add %s peer %s dev %s 2>/dev/null",
+				inet_ntop(AF_INET, local, s1, sizeof(s1)),
+				inet_ntop(AF_INET, peer, s2, sizeof(s2)),
+				ifname);
+#endif
+		(void)system(cmd);
+	} else if (is_valid_unicast_in(local) && prefix > 0) {
+		char s1[64];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+		char s2[64];
+		sprintf(cmd, "ifconfig %s %s %s 2>/dev/null", ifname,
+				inet_ntop(AF_INET, local, s1, sizeof(s1)),
+				inet_ntop(AF_INET, local, s2, sizeof(s2)));
+#else
+		sprintf(cmd, "ip addr add %s/%d dev %s 2>/dev/null",
+				inet_ntop(AF_INET, local, s1, sizeof(s1)),
+				prefix, ifname);
+#endif
+		(void)system(cmd);
+	}
+}
+
+void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix)
+{
+	char cmd[128];
+	if (is_valid_unicast_in6(local) && prefix > 0) {
+		char s1[64];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+		sprintf(cmd, "ifconfig %s inet6 %s/%d 2>/dev/null", ifname,
+				inet_ntop(AF_INET6, local, s1, sizeof(s1)), prefix);
+#else
+		sprintf(cmd, "ip -6 addr add %s/%d dev %s 2>/dev/null",
+				inet_ntop(AF_INET6, local, s1, sizeof(s1)),
+				prefix, ifname);
+#endif
+		(void)system(cmd);
+	}
+}
+
+void ip_link_set_mtu(const char *ifname, unsigned mtu)
+{
+	char cmd[128];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	sprintf(cmd, "ifconfig %s mtu %u", ifname, mtu);
+#else
+	sprintf(cmd, "ip link set dev %s mtu %u", ifname, mtu);
+#endif
+	(void)system(cmd);
+}
+
+void ip_link_set_updown(const char *ifname, bool up)
+{
+	char cmd[128];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	sprintf(cmd, "ifconfig %s %s", ifname, up ? "up" : "down");
+#else
+	sprintf(cmd, "ip link set %s %s", ifname, up ? "up" : "down");
+#endif
+	(void)system(cmd);
+}
+
+void ip_route_add_ipvx(const char *ifname, int af, void *network,
+		int prefix, int metric, const char *table)
+{
+	char cmd[128], __net[64] = "", __ip_sfx[40] = "";
+
+	inet_ntop(af, network, __net, sizeof(__net));
+	if (table)
+		sprintf(__ip_sfx, " table %s", table);
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	sprintf(cmd, "%s add -net %s/%d %s metric %d",
+			af == AF_INET6 ? "route -A inet6" : "route",
+			__net, prefix, ifname, metric);
+#else
+	sprintf(cmd, "%s route add %s/%d dev %s metric %d%s",
+			af == AF_INET6 ? "ip -6" : "ip", __net, prefix,
+			ifname, metric, __ip_sfx);
+#endif
+	(void)system(cmd);
 }
 
 void do_daemonize(void)
