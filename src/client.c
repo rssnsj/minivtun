@@ -22,7 +22,7 @@ static void handle_link_up(void)
 {
 	struct vt_route *rt;
 
-	syslog(LOG_INFO, "Link is up.\n");
+	syslog(LOG_INFO, "Link is up.");
 
 	ip_link_set_updown(config.ifname, true);
 
@@ -43,7 +43,7 @@ static void handle_link_up(void)
 
 static void handle_link_down(void)
 {
-	syslog(LOG_INFO, "Link is down.\n");
+	syslog(LOG_INFO, "Link is down.");
 
 	ip_link_set_updown(config.ifname, false);
 }
@@ -101,7 +101,7 @@ static int network_receiving(void)
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
 				return 0;
 		} else {
-			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
 			return 0;
 		}
 
@@ -157,7 +157,7 @@ static int tunnel_receiving(void)
 		if (ip_dlen < 40)
 			return 0;
 	} else {
-		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
 		return 0;
 	}
 
@@ -245,7 +245,7 @@ static bool do_link_health_assess(void)
 			fclose(fp);
 		}
 	} else {
-		syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
+		syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u",
 				state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
 	}
 
@@ -363,7 +363,7 @@ reconnect:
 			reset_state_on_reconnect();
 			inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 					s_peer_addr, sizeof(s_peer_addr));
-			syslog(LOG_INFO, "Reconnected to %s:%u.\n", s_peer_addr,
+			syslog(LOG_INFO, "Reconnected to %s:%u.", s_peer_addr,
 					ntohs(port_of_sockaddr(&state.peer_addr)));
 			continue;
 		}

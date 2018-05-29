@@ -102,7 +102,7 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 	}
 
 	if ((re = malloc(sizeof(*re))) == NULL) {
-		syslog(LOG_ERR, "*** [%s] malloc(): %s.\n", __FUNCTION__, strerror(errno));
+		syslog(LOG_ERR, "*** [%s] malloc(): %s.", __FUNCTION__, strerror(errno));
 		return NULL;
 	}
 
@@ -114,7 +114,7 @@ static struct ra_entry *ra_get_or_create(const struct sockaddr_inx *sa)
 
 	inet_ntop(re->real_addr.sa.sa_family, addr_of_sockaddr(&re->real_addr),
 			s_real_addr, sizeof(s_real_addr));
-	syslog(LOG_INFO, "New client [%s:%u]\n", s_real_addr,
+	syslog(LOG_INFO, "New client [%s:%u]", s_real_addr,
 			port_of_sockaddr(&re->real_addr));
 
 	return re;
@@ -136,7 +136,7 @@ static inline void ra_entry_release(struct ra_entry *re)
 
 	inet_ntop(re->real_addr.sa.sa_family, addr_of_sockaddr(&re->real_addr),
 			s_real_addr, sizeof(s_real_addr));
-	syslog(LOG_INFO, "Recycled client [%s:%u]\n", s_real_addr,
+	syslog(LOG_INFO, "Recycled client [%s:%u]", s_real_addr,
 			ntohs(port_of_sockaddr(&re->real_addr)));
 
 	free(re);
@@ -235,7 +235,7 @@ static inline void tun_client_release(struct tun_client *ce)
 	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			s_real_addr, sizeof(s_real_addr));
-	syslog(LOG_INFO, "Recycled virtual address [%s] at [%s:%u].\n", s_virt_addr,
+	syslog(LOG_INFO, "Recycled virtual address [%s] at [%s:%u].", s_virt_addr,
 			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	ra_put_no_free(ce->ra);
@@ -283,7 +283,7 @@ static struct tun_client *tun_client_get_or_create(
 
 	/* Not found, always create new entry. */
 	if ((ce = malloc(sizeof(*ce))) == NULL) {
-		syslog(LOG_ERR, "*** [%s] malloc(): %s.\n", __FUNCTION__, strerror(errno));
+		syslog(LOG_ERR, "*** [%s] malloc(): %s.", __FUNCTION__, strerror(errno));
 		return NULL;
 	}
 
@@ -301,7 +301,7 @@ static struct tun_client *tun_client_get_or_create(
 			  sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			  s_real_addr, sizeof(s_real_addr));
-	syslog(LOG_INFO, "New virtual address [%s] at [%s:%u].\n", s_virt_addr,
+	syslog(LOG_INFO, "New virtual address [%s] at [%s:%u].", s_virt_addr,
 			s_real_addr, ntohs(port_of_sockaddr(&ce->ra->real_addr)));
 
 	return ce;
@@ -488,7 +488,7 @@ static int network_receiving(void)
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
 				return 0;
 		} else {
-			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(nmsg->ipdata.proto));
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
 			return 0;
 		}
 
@@ -548,7 +548,7 @@ static int tunnel_receiving(void)
 		if (ip_dlen < 40)
 			return 0;
 	} else {
-		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.\n", ntohs(pi->proto));
+		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
 		return 0;
 	}
 
