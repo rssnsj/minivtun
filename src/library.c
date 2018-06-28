@@ -364,10 +364,6 @@ void do_daemonize(void)
 			close(fd);
 	}
 
-	/* Catch, ignore and handle signals */
-	signal(SIGCHLD, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
-
 	/* Let the child process become session leader */
 	if (setsid() < 0)
 		exit(1);

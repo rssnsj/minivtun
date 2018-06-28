@@ -8,10 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
-#include <assert.h>
 #include <signal.h>
 #include <syslog.h>
+#include <errno.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
@@ -259,8 +259,6 @@ int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
 
-	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
-
 	/* Dynamic link mode */
 	state.is_link_ok = false;
 	if (config.dynamic_link)
@@ -377,8 +375,6 @@ reconnect:
 			assert(rc == 0);
 		}
 	}
-
-	closelog();
 
 	return 0;
 }

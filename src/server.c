@@ -607,8 +607,6 @@ int run_server(const char *loc_addr_pair)
 {
 	char s_loc_addr[50];
 
-	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
-
 	if (get_sockaddr_inx_pair(loc_addr_pair, &state.local_addr) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
 		return -1;
@@ -680,8 +678,6 @@ int run_server(const char *loc_addr_pair)
 			state.last_walk = __current;
 		}
 	}
-
-	closelog();
 
 	return 0;
 }

@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <signal.h>
+#include <syslog.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 
@@ -292,6 +293,8 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
+
 	/* Configure IPv4 address for the interface. */
 	if (tun_ip_config) {
 		char s_lip[20], s_rip[20], *sp;
@@ -382,6 +385,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "*** No valid local or peer address specified.\n");
 		exit(1);
 	}
+
+	/* Some cleanups before exit */
+	if (config.health_file)
+		remove(config.health_file);
+	closelog();
 
 	return 0;
 }
