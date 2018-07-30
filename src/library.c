@@ -18,6 +18,8 @@
 
 #include "library.h"
 
+bool about_to_exit=false;
+
 struct name_cipher_pair cipher_pairs[] = {
 	{ "aes-128", EVP_aes_128_cbc, },
 	{ "aes-256", EVP_aes_256_cbc, },
@@ -378,5 +380,11 @@ void do_daemonize(void)
 
 	/* OK, set up the grandchild process */
 	chdir("/tmp");
+}
+
+void  signal_handler(int sig)
+{
+	about_to_exit=true;
+	fprintf(stderr, "minivtun: about to exit, sig=%d\n",sig);
 }
 
