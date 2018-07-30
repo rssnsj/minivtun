@@ -302,6 +302,9 @@ int run_client(const char *peer_addr_pair)
 		struct timeval __current, timeo;
 		int rc;
 
+		if(true==about_to_exit)
+			break;
+
 		FD_ZERO(&rset);
 		FD_SET(state.tunfd, &rset);
 		if (state.sockfd >= 0)

@@ -25,6 +25,8 @@ typedef char bool;
 #define true 1
 #define false 0
 
+extern bool about_to_exit;
+
 #define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define container_of(ptr, type, member) ({			\
@@ -202,6 +204,8 @@ static inline void hexdump(void *d, size_t len)
 }
 
 void do_daemonize(void);
+
+void  signal_handler(int sig);
 
 #endif /* __LIBRARY_H */
 

@@ -215,6 +215,8 @@ int main(int argc, char *argv[])
 		{ 0, 0, 0, 0, },
 	};
 
+	signal(SIGHUP, signal_handler);
+
 	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:Ddwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {

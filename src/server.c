@@ -651,6 +651,9 @@ int run_server(const char *loc_addr_pair)
 		struct timeval __current, timeo;
 		int rc;
 
+		if(true==about_to_exit)
+			break;
+
 		FD_ZERO(&rset);
 		FD_SET(state.tunfd, &rset);
 		FD_SET(state.sockfd, &rset);
