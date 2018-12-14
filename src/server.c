@@ -147,6 +147,7 @@ struct tun_addr {
 	union {
 		struct in_addr in;
 		struct in6_addr in6;
+		struct mac_addr mac;
 	};
 };
 struct tun_client {
@@ -180,9 +181,13 @@ static inline __u32 tun_addr_hash(const struct tun_addr *addr)
 	if (addr->af == AF_INET) {
 		return jhash_2words(addr->af, addr->in.s_addr, hash_initval);
 	} else if (addr->af == AF_INET6) {
-		const __be32 *aa = (void *)&addr->in6;
-		return jhash_2words(aa[2], aa[3],
-			jhash_3words(addr->af, aa[0], aa[1], hash_initval));
+		const __be32 *a = (void *)&addr->in6;
+		return jhash_2words(a[2], a[3],
+			jhash_3words(addr->af, a[0], a[1], hash_initval));
+	} else if (addr->af == AF_MACADDR) {
+		const __be32 *a = (void *)&addr->mac;
+		const __be16 *b = (void *)(a + 1);
+		return jhash_3words(addr->af, *a, *b, hash_initval);
 	} else {
 		abort();
 		return 0;
@@ -207,9 +212,31 @@ static inline int tun_addr_comp(
 		} else {
 			return 1;
 		}
+	} else if (a1->af == AF_MACADDR) {
+		if (is_mac_equal(&a1->mac, &a2->mac)) {
+			return 0;
+		} else {
+			return 1;
+		}
 	} else {
 		abort();
 		return 0;
+	}
+}
+
+static void tun_addr_ntop(const struct tun_addr *a, char *buf, socklen_t bufsz)
+{
+	const __u8 *b;
+
+	switch (a->af) {
+	case AF_INET:
+	case AF_INET6:
+		inet_ntop(a->af, &a->in, buf, bufsz);
+		break;
+	default:
+		b = a->mac.addr;
+		sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x",
+				b[0], b[1], b[2], b[3], b[4], b[5]);
 	}
 }
 
@@ -218,8 +245,7 @@ static inline void tun_client_dump(struct tun_client *ce)
 {
 	char s_virt_addr[50] = "", s_real_addr[50] = "";
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
-			  sizeof(s_virt_addr));
+	tun_addr_ntop(&ce->virt_addr, s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			  s_real_addr, sizeof(s_real_addr));
 	printf("[%s] (%s:%u), last_recv: %lu\n", s_virt_addr,
@@ -232,7 +258,7 @@ static inline void tun_client_release(struct tun_client *ce)
 {
 	char s_virt_addr[50], s_real_addr[50];
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr, sizeof(s_virt_addr));
+	tun_addr_ntop(&ce->virt_addr, s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			s_real_addr, sizeof(s_real_addr));
 	syslog(LOG_INFO, "Recycled virtual address [%s] at [%s:%u].", s_virt_addr,
@@ -297,8 +323,7 @@ static struct tun_client *tun_client_get_or_create(
 	list_add_tail(&ce->list, chain);
 	va_map_len++;
 
-	inet_ntop(ce->virt_addr.af, &ce->virt_addr.in, s_virt_addr,
-			  sizeof(s_virt_addr));
+	tun_addr_ntop(&ce->virt_addr, s_virt_addr, sizeof(s_virt_addr));
 	inet_ntop(ce->ra->real_addr.sa.sa_family, addr_of_sockaddr(&ce->ra->real_addr),
 			  s_real_addr, sizeof(s_real_addr));
 	syslog(LOG_INFO, "New virtual address [%s] at [%s:%u].", s_virt_addr,
@@ -392,6 +417,9 @@ static inline void source_addr_of_ipdata(
 	case AF_INET6:
 		memcpy(&addr->in6, (char *)data + 8, 16);
 		break;
+	case AF_MACADDR:
+		memcpy(&addr->mac, (char *)data + 6, 6);
+		break;
 	default:
 		abort();
 	}
@@ -407,6 +435,9 @@ static inline void dest_addr_of_ipdata(
 		break;
 	case AF_INET6:
 		memcpy(&addr->in6, (char *)data + 24, 16);
+		break;
+	case AF_MACADDR:
+		memcpy(&addr->mac, (char *)data + 0, 6);
 		break;
 	default:
 		abort();
@@ -464,38 +495,57 @@ static int network_receiving(void)
 		if (out_dlen < MINIVTUN_MSG_BASIC_HLEN + sizeof(nmsg->echo))
 			return 0;
 		/* Keep virtual addresses alive */
-		if (is_valid_unicast_in(&nmsg->echo.loc_tun_in)) {
-			virt_addr.af = AF_INET;
-			virt_addr.in = nmsg->echo.loc_tun_in;
-			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
-				ce->last_recv = __current;
-		}
-		if (is_valid_unicast_in6(&nmsg->echo.loc_tun_in6)) {
-			virt_addr.af = AF_INET6;
-			virt_addr.in6 = nmsg->echo.loc_tun_in6;
-			if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
-				ce->last_recv = __current;
+		if (config.tap_mode) {
+			/* TAP mode, handle as MAC address */
+			if (is_valid_unicast_mac(&nmsg->echo.loc_tun_mac)) {
+				virt_addr.af = AF_MACADDR;
+				virt_addr.mac = nmsg->echo.loc_tun_mac;
+				if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
+					ce->last_recv = __current;
+			}
+		} else {
+			/* TUN mode, handle as IP/IPv6 addresses */
+			if (is_valid_unicast_in(&nmsg->echo.loc_tun_in)) {
+				virt_addr.af = AF_INET;
+				virt_addr.in = nmsg->echo.loc_tun_in;
+				if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
+					ce->last_recv = __current;
+			}
+			if (is_valid_unicast_in6(&nmsg->echo.loc_tun_in6)) {
+				virt_addr.af = AF_INET6;
+				virt_addr.in6 = nmsg->echo.loc_tun_in6;
+				if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
+					ce->last_recv = __current;
+			}
 		}
 		break;
 	case MINIVTUN_MSG_IPDATA:
-		if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
-			af = AF_INET;
-			/* No packet is shorter than a 20-byte IPv4 header. */
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+		if (config.tap_mode) {
+			af = AF_MACADDR;
+			/* No ethernet packet is shorter than 12 bytes. */
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
 				return 0;
-		} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
-			af = AF_INET6;
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
-				return 0;
+			nmsg->ipdata.proto = 0;
+			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
 		} else {
-			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
-			return 0;
+			if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
+				af = AF_INET;
+				/* No valid IP packet is shorter than 20 bytes. */
+				if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+					return 0;
+			} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
+				af = AF_INET6;
+				if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
+					return 0;
+			} else {
+				syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
+				return 0;
+			}
+			ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
+			/* Drop incomplete IP packets. */
+			if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
+				return 0;
 		}
-
-		ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
-		/* Drop incomplete IP packets. */
-		if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
-			return 0;
 
 		source_addr_of_ipdata(nmsg->ipdata.data, af, &virt_addr);
 		if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)) == NULL)
@@ -538,18 +588,25 @@ static int tunnel_receiving(void)
 
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
 
-	/* We only accept IPv4 or IPv6 frames. */
-	if (pi->proto == htons(ETH_P_IP)) {
-		af = AF_INET;
-		if (ip_dlen < 20)
-			return 0;
-	} else if (pi->proto == htons(ETH_P_IPV6)) {
-		af = AF_INET6;
-		if (ip_dlen < 40)
+	if (config.tap_mode) {
+		/* Ethernet frame */
+		af = AF_MACADDR;
+		if (ip_dlen < 12)
 			return 0;
 	} else {
-		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
-		return 0;
+		/* We only accept IPv4 or IPv6 frames. */
+		if (pi->proto == htons(ETH_P_IP)) {
+			af = AF_INET;
+			if (ip_dlen < 20)
+				return 0;
+		} else if (pi->proto == htons(ETH_P_IPV6)) {
+			af = AF_INET6;
+			if (ip_dlen < 40)
+				return 0;
+		} else {
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
+			return 0;
+		}
 	}
 
 	dest_addr_of_ipdata(pi + 1, af, &virt_addr);
@@ -560,32 +617,36 @@ static int tunnel_receiving(void)
 		 * route table for a destination to send.
 		 */
 		void *gw;
-		struct tun_addr __va;
 
 		/* Lookup the gateway address first */
-		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in)) == NULL)
-			return 0;
+		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in))) {
+			/* Then find the gateway client entry */
+			struct tun_addr __va;
+			memset(&__va, 0x0, sizeof(__va));
+			__va.af = virt_addr.af;
+			if (virt_addr.af == AF_INET) {
+				__va.in = *(struct in_addr *)gw;
+			} else if (virt_addr.af == AF_INET6) {
+				__va.in6 = *(struct in6_addr *)gw;
+			} else {
+				__va.mac = *(struct mac_addr *)gw;
+			}
+			if ((ce = tun_client_try_get(&__va)) == NULL)
+				return 0;
 
-		/* Then find the gateway client entry */
-		memset(&__va, 0x0, sizeof(__va));
-		__va.af = virt_addr.af;
-		if (virt_addr.af == AF_INET) {
-			__va.in = *(struct in_addr *)gw;
+			/* Finally, create a client entry with this address */
+			if ((ce = tun_client_get_or_create(&virt_addr,
+				&ce->ra->real_addr)) == NULL)
+				return 0;
+		} else if (config.tap_mode) {
+			/* In TAP mode, fall through to broadcast to all clients */
 		} else {
-			__va.in6 = *(struct in6_addr *)gw;
+			return 0;
 		}
-		if ((ce = tun_client_try_get(&__va)) == NULL)
-			return 0;
-
-		/* Finally, create a client entry with this address */
-		if ((ce = tun_client_get_or_create(&virt_addr,
-			&ce->ra->real_addr)) == NULL)
-			return 0;
 	}
 
 	memset(&nmsg.hdr, 0x0, sizeof(nmsg.hdr));
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
-	nmsg.hdr.seq = htons(ce->ra->xmit_seq++);
 	memcpy(nmsg.hdr.auth_key, config.crypto_key, sizeof(nmsg.hdr.auth_key));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
@@ -596,9 +657,24 @@ static int tunnel_receiving(void)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	(void)sendto(state.sockfd, out_data, out_dlen, 0,
-			(struct sockaddr *)&ce->ra->real_addr,
-			sizeof_sockaddr(&ce->ra->real_addr));
+	if (ce) {
+		nmsg.hdr.seq = htons(ce->ra->xmit_seq++);
+		(void)sendto(state.sockfd, out_data, out_dlen, 0,
+				(struct sockaddr *)&ce->ra->real_addr,
+				sizeof_sockaddr(&ce->ra->real_addr));
+	} else {
+		/* Traverse all online clients and send */
+		unsigned i;
+		for (i = 0; i < RA_SET_HASH_SIZE; i++) {
+			struct ra_entry *re;
+			list_for_each_entry (re, &ra_set_hbase[i], list) {
+				nmsg.hdr.seq = htons(re->xmit_seq++);
+				(void)sendto(state.sockfd, out_data, out_dlen, 0,
+						(struct sockaddr *)&re->real_addr,
+						sizeof_sockaddr(&re->real_addr));
+			}
+		}
+	}
 
 	return 0;
 }

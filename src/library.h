@@ -38,6 +38,10 @@ typedef char bool;
 	#define ETH_P_IPV6 0x86dd /* IPv6 over bluebook */
 #endif
 
+/* Dummy types for ethernet mode */
+struct mac_addr { __u8 addr[6]; };
+#define AF_MACADDR AF_PACKET
+
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
 static inline bool is_in6_equal(const struct in6_addr *a1, const struct in6_addr *a2)
@@ -45,6 +49,17 @@ static inline bool is_in6_equal(const struct in6_addr *a1, const struct in6_addr
 	const __be32 *b1 = (__be32 *)a1, *b2 = (__be32 *)a2;
 	if (b1[0] == b2[0] && b1[1] == b2[1] &&
 		b1[2] == b2[2] && b1[3] == b2[3]) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static inline bool is_mac_equal(const struct mac_addr *a1, const struct mac_addr *a2)
+{
+	const __be32 *b1 = (__be32 *)a1, *b2 = (__be32 *)a2;
+	const __be16 *c1 = (__be16 *)(b1 + 1), *c2 = (__be16 *)(b2 + 1);
+	if (*b1 == *b2 && *c1 == *c2) {
 		return true;
 	} else {
 		return false;
@@ -86,7 +101,7 @@ static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 
 int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
 int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr);
-int tun_alloc(char *dev);
+int tun_alloc(char *dev, bool tap_mode);
 
 void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
 		struct in_addr *peer, int prefix);
@@ -108,6 +123,20 @@ static inline bool is_valid_unicast_in6(struct in6_addr *in6)
 	__u32 a0 = ntohl(((__be32 *)in6)[0]);
 	return  ((a0 & 0xff000000) != 0x00000000) &&
 			((a0 & 0xff000000) != 0xff000000);
+}
+
+static inline bool is_valid_unicast_mac(struct mac_addr *mac)
+{
+	if ((mac->addr[0] & 0x01)) {
+		return false;
+	} else {
+		__be16 *a = (__be16 *)mac;
+		if (a[0] == 0 && a[1] == 0 && a[2] == 0) {
+			return false;
+		} else {
+			return true;
+		}
+	}
 }
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */

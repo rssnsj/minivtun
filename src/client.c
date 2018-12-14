@@ -34,10 +34,12 @@ static void handle_link_up(void)
 	ip_addr_add_ipv6(config.ifname, &config.tun_in6_local,
 			config.tun_in6_prefix);
 
-	/* Attach the dynamic routes */
-	for (rt = config.vt_routes; rt; rt = rt->next) {
-		ip_route_add_ipvx(config.ifname, rt->af, &rt->network, rt->prefix,
-			config.vt_metric, config.vt_table[0] ? config.vt_table : NULL);
+	if (!config.tap_mode) {
+		/* Attach the dynamic routes */
+		for (rt = config.vt_routes; rt; rt = rt->next) {
+			ip_route_add_ipvx(config.ifname, rt->af, &rt->network, rt->prefix,
+				config.vt_metric, config.vt_table[0] ? config.vt_table : NULL);
+		}
 	}
 }
 
@@ -93,22 +95,30 @@ static int network_receiving(void)
 
 	switch (nmsg->hdr.opcode) {
 	case MINIVTUN_MSG_IPDATA:
-		if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
-			/* No packet is shorter than a 20-byte IPv4 header. */
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+		if (config.tap_mode) {
+			/* No ethernet packet is shorter than 12 bytes. */
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
 				return 0;
-		} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
-				return 0;
+			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
+			nmsg->ipdata.proto = 0;
 		} else {
-			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
-			return 0;
-		}
+			if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
+				/* No valid IP packet is shorter than 20 bytes. */
+				if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 20)
+					return 0;
+			} else if (nmsg->ipdata.proto == htons(ETH_P_IPV6)) {
+				if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 40)
+					return 0;
+			} else {
+				syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(nmsg->ipdata.proto));
+				return 0;
+			}
 
-		ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
-		/* Drop incomplete IP packets. */
-		if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
-			return 0;
+			ip_dlen = ntohs(nmsg->ipdata.ip_dlen);
+			/* Drop incomplete IP packets. */
+			if (out_dlen - MINIVTUN_MSG_IPDATA_OFFSET < ip_dlen)
+				return 0;
+		}
 
 		pi.flags = 0;
 		pi.proto = nmsg->ipdata.proto;
@@ -149,16 +159,21 @@ static int tunnel_receiving(void)
 
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
 
-	/* We only accept IPv4 or IPv6 frames. */
-	if (pi->proto == htons(ETH_P_IP)) {
-		if (ip_dlen < 20)
-			return 0;
-	} else if (pi->proto == htons(ETH_P_IPV6)) {
-		if (ip_dlen < 40)
+	if (config.tap_mode) {
+		if (ip_dlen < 12)
 			return 0;
 	} else {
-		syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
-		return 0;
+		/* We only accept IPv4 or IPv6 frames. */
+		if (pi->proto == htons(ETH_P_IP)) {
+			if (ip_dlen < 20)
+				return 0;
+		} else if (pi->proto == htons(ETH_P_IPV6)) {
+			if (ip_dlen < 40)
+				return 0;
+		} else {
+			syslog(LOG_WARNING, "*** Invalid protocol: 0x%x.", ntohs(pi->proto));
+			return 0;
+		}
 	}
 
 	memset(&nmsg.hdr, 0x0, sizeof(nmsg.hdr));
@@ -187,12 +202,14 @@ static void do_an_echo_request(void)
 	size_t out_len;
 	__be32 r = rand();
 
-	memset(&nmsg->hdr, 0x0, sizeof(nmsg->hdr));
+	memset(nmsg, 0x0, sizeof(nmsg->hdr) + sizeof(nmsg->echo));
 	nmsg->hdr.opcode = MINIVTUN_MSG_ECHO_REQ;
 	nmsg->hdr.seq = htons(state.xmit_seq++);
 	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
-	nmsg->echo.loc_tun_in = config.tun_in_local;
-	nmsg->echo.loc_tun_in6 = config.tun_in6_local;
+	if (!config.tap_mode) {
+		nmsg->echo.loc_tun_in = config.tun_in_local;
+		nmsg->echo.loc_tun_in6 = config.tun_in6_local;
+	}
 	nmsg->echo.id = r;
 
 	out_msg = crypt_buffer;

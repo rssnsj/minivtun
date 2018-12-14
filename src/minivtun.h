@@ -41,6 +41,8 @@ struct minivtun_config {
 	char crypto_key[CRYPTO_MAX_KEY_SIZE];
 	const void *crypto_type;
 
+	bool tap_mode;
+
 	/* IPv4 address settings */
 	struct in_addr tun_in_local;
 	struct in_addr tun_in_peer;
@@ -108,8 +110,13 @@ struct minivtun_msg {
 			char data[NM_PI_BUFFER_SIZE];
 		} __attribute__((packed)) ipdata;    /* 4+ */
 		struct {
-			struct in_addr loc_tun_in;
-			struct in6_addr loc_tun_in6;
+			union {
+				struct {
+					struct in_addr loc_tun_in;
+					struct in6_addr loc_tun_in6;
+				};
+				struct mac_addr loc_tun_mac;
+			};
 			__be32 id;
 		} __attribute__((packed)) echo; /* 24 */
 	};
