@@ -28,6 +28,7 @@ struct minivtun_config config = {
 	.crypto_type = NULL,
 	.pid_file = NULL,
 	.health_file = NULL,
+	.tap_mode = false,
 	.in_background = false,
 	.wait_dns = false,
 	.dynamic_link = false,
@@ -176,6 +177,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("      --health-file <file_path>       file for writing real-time health data.\n");
+	printf("  -E, --tap                           TAP mode\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
 	printf("Supported encryption algorithms:\n");
@@ -190,7 +192,7 @@ int main(int argc, char *argv[])
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
-	int opt;
+	int override_mtu = 0, opt;
 
 	static struct option long_opts[] = {
 		{ "local", required_argument, 0, 'l', },
@@ -209,13 +211,14 @@ int main(int argc, char *argv[])
 		{ "metric", required_argument, 0, 'M', },
 		{ "table", required_argument, 0, 'T', },
 		{ "dynamic-link", no_argument, 0, 'D', },
+		{ "tap", no_argument, 0, 'E', },
 		{ "daemon", no_argument, 0, 'd', },
 		{ "wait-dns", no_argument, 0, 'w', },
 		{ "help", no_argument, 0, 'h', },
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:Ddwh",
+	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -237,7 +240,7 @@ int main(int argc, char *argv[])
 			tun_ip6_config = optarg;
 			break;
 		case 'm':
-			config.tun_mtu = (unsigned)strtoul(optarg, NULL, 10);
+			override_mtu = strtoul(optarg, NULL, 10);
 			break;
 		case 'k':
 			config.keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
@@ -268,6 +271,9 @@ int main(int argc, char *argv[])
 		case 'D':
 			config.dynamic_link = true;
 			break;
+		case 'E':
+			config.tap_mode = true;
+			break;
 		case 'd':
 			config.in_background = true;
 			break;
@@ -283,12 +289,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (override_mtu) {
+		config.tun_mtu = override_mtu;
+	} else {
+		/* Default ethernet mode MTU: 1500 */
+		if (config.tap_mode)
+			config.tun_mtu = 1500;
+	}
+
 	/* Random seed */
 	srand(getpid());
 
-	if (strlen(config.ifname) == 0)
+	if (config.ifname[0] == '\0')
 		strcpy(config.ifname, "mv%d");
-	if ((state.tunfd = tun_alloc(config.ifname)) < 0) {
+	if ((state.tunfd = tun_alloc(config.ifname, config.tap_mode)) < 0) {
 		fprintf(stderr, "*** open_tun() failed: %s.\n", strerror(errno));
 		exit(1);
 	}

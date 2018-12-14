@@ -205,7 +205,7 @@ int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_ad
 	return sockfd;
 }
 
-int tun_alloc(char *dev)
+int tun_alloc(char *dev, bool tap_mode)
 {
 	int fd = -1, err;
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -235,7 +235,11 @@ int tun_alloc(char *dev)
 	}
 
 	memset(&ifr, 0, sizeof(ifr));
-	ifr.ifr_flags = IFF_TUN;
+	if (tap_mode) {
+		ifr.ifr_flags = IFF_TAP;
+	} else {
+		ifr.ifr_flags = IFF_TUN;
+	}
 	if (dev[0])
 		strncpy(ifr.ifr_name, dev, IFNAMSIZ);
 	if ((err = ioctl(fd, TUNSETIFF, (void *)&ifr)) < 0) {
