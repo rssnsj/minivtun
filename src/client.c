@@ -99,6 +99,7 @@ static int network_receiving(void)
 			/* No ethernet packet is shorter than 12 bytes. */
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
 				return 0;
+			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
 			nmsg->ipdata.proto = 0;
 		} else {
 			if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
@@ -201,7 +202,7 @@ static void do_an_echo_request(void)
 	size_t out_len;
 	__be32 r = rand();
 
-	memset(&nmsg->hdr, 0x0, sizeof(nmsg->hdr));
+	memset(nmsg, 0x0, sizeof(nmsg->hdr) + sizeof(nmsg->echo));
 	nmsg->hdr.opcode = MINIVTUN_MSG_ECHO_REQ;
 	nmsg->hdr.seq = htons(state.xmit_seq++);
 	memcpy(nmsg->hdr.auth_key, config.crypto_key, sizeof(nmsg->hdr.auth_key));
