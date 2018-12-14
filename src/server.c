@@ -617,34 +617,36 @@ static int tunnel_receiving(void)
 		 * route table for a destination to send.
 		 */
 		void *gw;
-		struct tun_addr __va;
 
 		/* Lookup the gateway address first */
-		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in)) == NULL)
-			return 0;
+		if ((gw = vt_route_lookup(virt_addr.af, &virt_addr.in))) {
+			/* Then find the gateway client entry */
+			struct tun_addr __va;
+			memset(&__va, 0x0, sizeof(__va));
+			__va.af = virt_addr.af;
+			if (virt_addr.af == AF_INET) {
+				__va.in = *(struct in_addr *)gw;
+			} else if (virt_addr.af == AF_INET6) {
+				__va.in6 = *(struct in6_addr *)gw;
+			} else {
+				__va.mac = *(struct mac_addr *)gw;
+			}
+			if ((ce = tun_client_try_get(&__va)) == NULL)
+				return 0;
 
-		/* Then find the gateway client entry */
-		memset(&__va, 0x0, sizeof(__va));
-		__va.af = virt_addr.af;
-		if (virt_addr.af == AF_INET) {
-			__va.in = *(struct in_addr *)gw;
-		} else if (virt_addr.af == AF_INET6) {
-			__va.in6 = *(struct in6_addr *)gw;
+			/* Finally, create a client entry with this address */
+			if ((ce = tun_client_get_or_create(&virt_addr,
+				&ce->ra->real_addr)) == NULL)
+				return 0;
+		} else if (config.tap_mode) {
+			/* In TAP mode, fall through to broadcast to all clients */
 		} else {
-			__va.mac = *(struct mac_addr *)gw;
+			return 0;
 		}
-		if ((ce = tun_client_try_get(&__va)) == NULL)
-			return 0;
-
-		/* Finally, create a client entry with this address */
-		if ((ce = tun_client_get_or_create(&virt_addr,
-			&ce->ra->real_addr)) == NULL)
-			return 0;
 	}
 
 	memset(&nmsg.hdr, 0x0, sizeof(nmsg.hdr));
 	nmsg.hdr.opcode = MINIVTUN_MSG_IPDATA;
-	nmsg.hdr.seq = htons(ce->ra->xmit_seq++);
 	memcpy(nmsg.hdr.auth_key, config.crypto_key, sizeof(nmsg.hdr.auth_key));
 	nmsg.ipdata.proto = pi->proto;
 	nmsg.ipdata.ip_dlen = htons(ip_dlen);
@@ -655,9 +657,24 @@ static int tunnel_receiving(void)
 	out_dlen = MINIVTUN_MSG_IPDATA_OFFSET + ip_dlen;
 	local_to_netmsg(&nmsg, &out_data, &out_dlen);
 
-	(void)sendto(state.sockfd, out_data, out_dlen, 0,
-			(struct sockaddr *)&ce->ra->real_addr,
-			sizeof_sockaddr(&ce->ra->real_addr));
+	if (ce) {
+		nmsg.hdr.seq = htons(ce->ra->xmit_seq++);
+		(void)sendto(state.sockfd, out_data, out_dlen, 0,
+				(struct sockaddr *)&ce->ra->real_addr,
+				sizeof_sockaddr(&ce->ra->real_addr));
+	} else {
+		/* Traverse all online clients and send */
+		unsigned i;
+		for (i = 0; i < RA_SET_HASH_SIZE; i++) {
+			struct ra_entry *re;
+			list_for_each_entry (re, &ra_set_hbase[i], list) {
+				nmsg.hdr.seq = htons(re->xmit_seq++);
+				(void)sendto(state.sockfd, out_data, out_dlen, 0,
+						(struct sockaddr *)&re->real_addr,
+						sizeof_sockaddr(&re->real_addr));
+			}
+		}
+	}
 
 	return 0;
 }
