@@ -240,7 +240,7 @@ static void tun_addr_ntop(const struct tun_addr *a, char *buf, socklen_t bufsz)
 	}
 }
 
-#if 0
+#ifdef DUMP_TUN_CLIENTS_ON_WALK
 static inline void tun_client_dump(struct tun_client *ce)
 {
 	char s_virt_addr[50] = "", s_real_addr[50] = "";
@@ -376,7 +376,9 @@ static void va_ra_walk_continue(void)
 	if (va_walk_max > 0) {
 		do {
 			list_for_each_entry_safe (ce, __ce, &va_map_hbase[va_index], list) {
-				//tun_client_dump(ce);
+#ifdef DUMP_TUN_CLIENTS_ON_WALK
+				tun_client_dump(ce);
+#endif
 				if (__sub_timeval_ms(&__current, &ce->last_recv) >
 					config.reconnect_timeo * 1000) {
 					tun_client_release(ce);
