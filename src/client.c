@@ -275,6 +275,10 @@ static bool do_link_health_assess(void)
 int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
+	struct timeval startup_time;
+
+	/* Remember the startup time for checking with 'config.exit_after' */
+	gettimeofday(&startup_time, NULL);
 
 	/* Dynamic link mode */
 	state.is_link_ok = false;
@@ -342,9 +346,17 @@ int run_client(const char *peer_addr_pair)
 		if (timercmp(&state.last_echo_recv, &__current, >))
 			state.last_echo_recv = __current;
 
+		/* Command line requires an "exit after N seconds" */
+		if (config.exit_after > 0 && __sub_timeval_ms(&__current, &startup_time)
+				>= config.exit_after * 1000) {
+			syslog(LOG_INFO, "User sets a force-to-exit after %u seconds. Exited.",
+					config.exit_after);
+			exit(0);
+		}
+
 		/* Calculate packet loss and RTT for a link health assess */
-		if (__sub_timeval_ms(&__current, &state.last_health_assess) >=
-			config.health_assess_timeo * 1000) {
+		if (__sub_timeval_ms(&__current, &state.last_health_assess)
+				>= config.health_assess_timeo * 1000) {
 			state.last_health_assess = __current;
 			if (!do_link_health_assess())
 				goto reconnect;

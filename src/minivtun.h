@@ -58,6 +58,7 @@ struct minivtun_config {
 	/* Client only configuration */
 	int vt_metric;
 	char vt_table[32];
+	unsigned exit_after;
 	bool dynamic_link;
 };
 

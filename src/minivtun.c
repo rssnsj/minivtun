@@ -174,6 +174,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -v, --route <network/prefix>[=gw]   attached IPv4/IPv6 route on this link, can be multiple\n");
 	printf("  -M, --metric <metric>               metric of attached IPv4 routes\n");
 	printf("  -T, --table <table_name>            route table of the attached IPv4 routes\n");
+	printf("  -x, --exit-after <N>                force the client to exit after N seconds\n");
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("      --health-file <file_path>       file for writing real-time health data.\n");
@@ -210,6 +211,7 @@ int main(int argc, char *argv[])
 		{ "route", required_argument, 0, 'v', },
 		{ "metric", required_argument, 0, 'M', },
 		{ "table", required_argument, 0, 'T', },
+		{ "exit-after", required_argument, 0, 'x', },
 		{ "dynamic-link", no_argument, 0, 'D', },
 		{ "tap", no_argument, 0, 'E', },
 		{ "daemon", no_argument, 0, 'd', },
@@ -218,7 +220,7 @@ int main(int argc, char *argv[])
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:x:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -267,6 +269,9 @@ int main(int argc, char *argv[])
 		case 'T':
 			strncpy(config.vt_table, optarg, sizeof(config.vt_table));
 			config.vt_table[sizeof(config.vt_table) - 1] = '\0';
+			break;
+		case 'x':
+			config.exit_after = strtoul(optarg, NULL, 0);
 			break;
 		case 'D':
 			config.dynamic_link = true;
