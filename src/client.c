@@ -306,6 +306,9 @@ int run_client(const char *peer_addr_pair)
 		return -1;
 	}
 
+	if (config.exit_after)
+		printf("NOTICE: This client will exit autonomously in %u seconds.\n", config.exit_after);
+
 	/* Run in background */
 	if (config.in_background)
 		do_daemonize();
@@ -347,7 +350,7 @@ int run_client(const char *peer_addr_pair)
 			state.last_echo_recv = __current;
 
 		/* Command line requires an "exit after N seconds" */
-		if (config.exit_after > 0 && __sub_timeval_ms(&__current, &startup_time)
+		if (config.exit_after && __sub_timeval_ms(&__current, &startup_time)
 				>= config.exit_after * 1000) {
 			syslog(LOG_INFO, "User sets a force-to-exit after %u seconds. Exited.",
 					config.exit_after);
