@@ -178,7 +178,9 @@ static void print_help(int argc, char *argv[])
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("      --health-file <file_path>       file for writing real-time health data.\n");
+#ifdef __linux__
 	printf("  -E, --tap                           TAP mode\n");
+#endif
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
 	printf("Supported encryption algorithms:\n");
@@ -213,7 +215,9 @@ int main(int argc, char *argv[])
 		{ "table", required_argument, 0, 'T', },
 		{ "exit-after", required_argument, 0, 'x', },
 		{ "dynamic-link", no_argument, 0, 'D', },
+#ifdef __linux__
 		{ "tap", no_argument, 0, 'E', },
+#endif
 		{ "daemon", no_argument, 0, 'd', },
 		{ "wait-dns", no_argument, 0, 'w', },
 		{ "help", no_argument, 0, 'h', },
@@ -276,9 +280,11 @@ int main(int argc, char *argv[])
 		case 'D':
 			config.dynamic_link = true;
 			break;
+#ifdef __linux__
 		case 'E':
 			config.tap_mode = true;
 			break;
+#endif
 		case 'd':
 			config.in_background = true;
 			break;

@@ -184,10 +184,12 @@ static inline __u32 tun_addr_hash(const struct tun_addr *addr)
 		const __be32 *a = (void *)&addr->in6;
 		return jhash_2words(a[2], a[3],
 			jhash_3words(addr->af, a[0], a[1], hash_initval));
+	#ifdef __linux__
 	} else if (addr->af == AF_MACADDR) {
 		const __be32 *a = (void *)&addr->mac;
 		const __be16 *b = (void *)(a + 1);
 		return jhash_3words(addr->af, *a, *b, hash_initval);
+	#endif
 	} else {
 		abort();
 		return 0;
@@ -212,12 +214,14 @@ static inline int tun_addr_comp(
 		} else {
 			return 1;
 		}
+	#ifdef __linux__
 	} else if (a1->af == AF_MACADDR) {
 		if (is_mac_equal(&a1->mac, &a2->mac)) {
 			return 0;
 		} else {
 			return 1;
 		}
+	#endif
 	} else {
 		abort();
 		return 0;
@@ -419,9 +423,11 @@ static inline void source_addr_of_ipdata(
 	case AF_INET6:
 		memcpy(&addr->in6, (char *)data + 8, 16);
 		break;
+	#ifdef __linux__
 	case AF_MACADDR:
 		memcpy(&addr->mac, (char *)data + 6, 6);
 		break;
+	#endif
 	default:
 		abort();
 	}
@@ -438,9 +444,11 @@ static inline void dest_addr_of_ipdata(
 	case AF_INET6:
 		memcpy(&addr->in6, (char *)data + 24, 16);
 		break;
+	#ifdef __linux__
 	case AF_MACADDR:
 		memcpy(&addr->mac, (char *)data + 0, 6);
 		break;
+	#endif
 	default:
 		abort();
 	}
@@ -498,6 +506,7 @@ static int network_receiving(void)
 			return 0;
 		/* Keep virtual addresses alive */
 		if (config.tap_mode) {
+			#ifdef __linux__
 			/* TAP mode, handle as MAC address */
 			if (is_valid_unicast_mac(&nmsg->echo.loc_tun_mac)) {
 				virt_addr.af = AF_MACADDR;
@@ -505,6 +514,9 @@ static int network_receiving(void)
 				if ((ce = tun_client_get_or_create(&virt_addr, &real_peer)))
 					ce->last_recv = __current;
 			}
+			#else
+			return 0;
+			#endif
 		} else {
 			/* TUN mode, handle as IP/IPv6 addresses */
 			if (is_valid_unicast_in(&nmsg->echo.loc_tun_in)) {
@@ -523,12 +535,16 @@ static int network_receiving(void)
 		break;
 	case MINIVTUN_MSG_IPDATA:
 		if (config.tap_mode) {
+			#ifdef __linux__
 			af = AF_MACADDR;
 			/* No ethernet packet is shorter than 12 bytes. */
 			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
 				return 0;
 			nmsg->ipdata.proto = 0;
 			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
+			#else
+			return 0;
+			#endif
 		} else {
 			if (nmsg->ipdata.proto == htons(ETH_P_IP)) {
 				af = AF_INET;
@@ -592,9 +608,13 @@ static int tunnel_receiving(void)
 
 	if (config.tap_mode) {
 		/* Ethernet frame */
+		#ifdef __linux__
 		af = AF_MACADDR;
 		if (ip_dlen < 12)
 			return 0;
+		#else
+		return 0;
+		#endif
 	} else {
 		/* We only accept IPv4 or IPv6 frames. */
 		if (pi->proto == htons(ETH_P_IP)) {
