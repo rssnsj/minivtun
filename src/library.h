@@ -113,6 +113,8 @@ void ip_link_set_updown(const char *ifname, bool up);
 void ip_route_add_ipvx(const char *ifname, int af, void *network, int prefix,
 		int metric, const char *table);
 
+void ip_link_set_tap_mac(const char *ifname, const char *mac);
+
 static inline bool is_valid_unicast_in(struct in_addr *in)
 {
 	__u32 a = ntohl(in->s_addr);

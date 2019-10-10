@@ -180,6 +180,7 @@ static void print_help(int argc, char *argv[])
 	printf("      --health-file <file_path>       file for writing real-time health data.\n");
 #ifdef __linux__
 	printf("  -E, --tap                           TAP mode\n");
+	printf("  -B, --mac <mac_address>             specify the MAC address of TAP interface\n");
 #endif
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
@@ -194,6 +195,7 @@ int main(int argc, char *argv[])
 {
 	const char *tun_ip_config = NULL, *tun_ip6_config = NULL;
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
+	const char *tap_mac_config = NULL;
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
 	int override_mtu = 0, opt;
 
@@ -217,6 +219,7 @@ int main(int argc, char *argv[])
 		{ "dynamic-link", no_argument, 0, 'D', },
 #ifdef __linux__
 		{ "tap", no_argument, 0, 'E', },
+		{ "mac", required_argument, 0, 'B', },
 #endif
 		{ "daemon", no_argument, 0, 'd', },
 		{ "wait-dns", no_argument, 0, 'w', },
@@ -224,7 +227,7 @@ int main(int argc, char *argv[])
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:x:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:x:DEB:dwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -284,6 +287,9 @@ int main(int argc, char *argv[])
 		case 'E':
 			config.tap_mode = true;
 			break;
+		case 'B':
+			tap_mac_config = optarg;
+			break;
 #endif
 		case 'd':
 			config.in_background = true;
@@ -319,6 +325,17 @@ int main(int argc, char *argv[])
 	}
 
 	openlog(config.ifname, LOG_PID | LOG_PERROR | LOG_NDELAY, LOG_USER);
+
+	/* Configure MAC address for the TAP interface. */
+	if (config.tap_mode && tap_mac_config) {
+		// a quick-n-dirty check on MAC string
+		if (strlen(tap_mac_config) != 17 || strchr(tap_mac_config, ':') == NULL ) {
+			fprintf(stderr, "*** Invalid mac address: %s.\n", tap_mac_config);
+			exit(1);
+		}
+
+		ip_link_set_tap_mac(config.ifname, tap_mac_config);
+	}
 
 	/* Configure IPv4 address for the interface. */
 	if (tun_ip_config) {

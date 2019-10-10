@@ -344,6 +344,19 @@ void ip_route_add_ipvx(const char *ifname, int af, void *network,
 	(void)system(cmd);
 }
 
+void ip_link_set_tap_mac(const char *ifname, const char *mac)
+{
+	/* only available under linux */
+#if defined(__linux__)
+	char cmd[128];
+	sprintf(cmd, "ip link set dev %s address %s", ifname, mac);
+	(void)system(cmd);
+#else
+	(void)ifname;
+	(void)mac;
+#endif
+}
+
 void do_daemonize(void)
 {
 	pid_t pid;
