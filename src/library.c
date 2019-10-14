@@ -304,7 +304,7 @@ void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix)
 
 void ip_link_set_mtu(const char *ifname, unsigned mtu)
 {
-	char cmd[128];
+	char cmd[200];
 #if defined(__APPLE__) || defined(__FreeBSD__)
 	sprintf(cmd, "ifconfig %s mtu %u", ifname, mtu);
 #else
