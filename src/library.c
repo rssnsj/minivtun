@@ -255,7 +255,7 @@ int tun_alloc(char *dev, bool tap_mode)
 void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
 		struct in_addr *peer, int prefix)
 {
-	char cmd[128];
+	char cmd[256];
 	if (is_valid_unicast_in(local) && is_valid_unicast_in(peer)) {
 		char s1[64], s2[64];
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -287,7 +287,7 @@ void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
 
 void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix)
 {
-	char cmd[128];
+	char cmd[256];
 	if (is_valid_unicast_in6(local) && prefix > 0) {
 		char s1[64];
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -304,7 +304,7 @@ void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix)
 
 void ip_link_set_mtu(const char *ifname, unsigned mtu)
 {
-	char cmd[200];
+	char cmd[256];
 #if defined(__APPLE__) || defined(__FreeBSD__)
 	sprintf(cmd, "ifconfig %s mtu %u", ifname, mtu);
 #else
@@ -315,7 +315,7 @@ void ip_link_set_mtu(const char *ifname, unsigned mtu)
 
 void ip_link_set_updown(const char *ifname, bool up)
 {
-	char cmd[128];
+	char cmd[256];
 #if defined(__APPLE__) || defined(__FreeBSD__)
 	sprintf(cmd, "ifconfig %s %s", ifname, up ? "up" : "down");
 #else
@@ -327,7 +327,7 @@ void ip_link_set_updown(const char *ifname, bool up)
 void ip_route_add_ipvx(const char *ifname, int af, void *network,
 		int prefix, int metric, const char *table)
 {
-	char cmd[128], __net[64] = "", __ip_sfx[40] = "";
+	char cmd[256], __net[64] = "", __ip_sfx[40] = "";
 
 	inet_ntop(af, network, __net, sizeof(__net));
 	if (table)
