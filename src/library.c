@@ -211,12 +211,18 @@ int tun_alloc(char *dev, bool tap_mode)
 #if defined(__APPLE__) || defined(__FreeBSD__)
 	int b_enable = 1, i;
 
-	for (i = 0; i < 8; i++) {
+	if (strncmp(dev, "tun", 3) == 0) {
 		char dev_path[20];
-		sprintf(dev_path, "/dev/tun%d", i);
-		if ((fd = open(dev_path, O_RDWR)) >= 0) {
-			sprintf(dev, "tun%d", i);
-			break;
+		snprintf(dev_path, sizeof(dev_path), "/dev/%s", dev);
+		fd = open(dev_path, O_RDWR);
+	} else {
+		for (i = 0; i < 8; i++) {
+			char dev_path[20];
+			sprintf(dev_path, "/dev/tun%d", i);
+			if ((fd = open(dev_path, O_RDWR)) >= 0) {
+				sprintf(dev, "tun%d", i);
+				break;
+			}
 		}
 	}
 	if (fd < 0)
