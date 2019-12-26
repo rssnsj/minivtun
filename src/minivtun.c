@@ -161,7 +161,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -x, --exit-after <N>                force the client to exit after N seconds\n");
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
-	printf("      --health-file <file_path>       file for writing real-time health data.\n");
+	printf("  -H, --health-file <file_path>       file for writing real-time health data.\n");
 	printf("  -E, --tap                           TAP mode\n");
 	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -h, --help                          print this help\n");
