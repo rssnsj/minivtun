@@ -136,21 +136,6 @@ static void parse_virtual_route(const char *arg)
 	vt_route_add(af, &network, prefix, &gateway);
 }
 
-static int try_resolve_addr_pair(const char *addr_pair)
-{
-	struct sockaddr_inx inx;
-	char s_addr[50] = "";
-	int rc;
-
-	if ((rc = get_sockaddr_inx_pair(addr_pair, &inx)) < 0)
-		return 1;
-
-	inet_ntop(inx.sa.sa_family, addr_of_sockaddr(&inx), s_addr, sizeof(s_addr));
-	printf("[%s]:%u\n", s_addr, ntohs(port_of_sockaddr(&inx)));
-
-	return 0;
-}
-
 static void print_help(int argc, char *argv[])
 {
 	int i;
@@ -161,7 +146,6 @@ static void print_help(int argc, char *argv[])
 	printf("Options:\n");
 	printf("  -l, --local <ip:port>               local IP:port for server to listen\n");
 	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
-	printf("  -R, --resolve <host:port>           try to resolve a hostname\n");
 	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
@@ -198,7 +182,6 @@ int main(int argc, char *argv[])
 	static struct option long_opts[] = {
 		{ "local", required_argument, 0, 'l', },
 		{ "remote", required_argument, 0, 'r', },
-		{ "resolve", required_argument, 0, 'R', },
 		{ "health-file", required_argument, 0, 'H', },
 		{ "ipv4-addr", required_argument, 0, 'a', },
 		{ "ipv6-addr", required_argument, 0, 'A', },
@@ -220,7 +203,7 @@ int main(int argc, char *argv[])
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:R:H:a:A:m:k:n:p:e:t:v:M:T:x:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:H:a:A:m:k:n:p:e:t:v:M:T:x:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -228,9 +211,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			peer_addr_pair = optarg;
-			break;
-		case 'R':
-			exit(try_resolve_addr_pair(optarg));
 			break;
 		case 'H':
 			config.health_file = optarg;
