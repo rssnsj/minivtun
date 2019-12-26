@@ -131,9 +131,10 @@ static int network_receiving(void)
 		break;
 	case MINIVTUN_MSG_ECHO_ACK:
 		if (state.has_pending_echo && nmsg->echo.id == state.pending_echo_id) {
+			struct stats_data *st = &state.stats_buckets[state.current_bucket];
+			st->total_echo_rcvd++;
+			st->total_rtt_ms += __sub_timeval_ms(&__current, &state.last_echo_sent);
 			state.last_echo_recv = __current;
-			state.total_echo_rcvd++;
-			state.total_rtt_ms += __sub_timeval_ms(&__current, &state.last_echo_sent);
 			state.has_pending_echo = false;
 		}
 		break;
@@ -220,53 +221,64 @@ static void do_an_echo_request(void)
 
 	state.has_pending_echo = true;
 	state.pending_echo_id = r; /* must be checked on ECHO_ACK */
-	state.total_echo_sent++;
-}
-
-static void reset_health_assess_data(void)
-{
-	state.has_pending_echo = false;
-	state.pending_echo_id = 0;
-
-	state.total_echo_sent = 0;
-	state.total_echo_rcvd = 0;
-	state.total_rtt_ms = 0;
+	state.stats_buckets[state.current_bucket].total_echo_sent++;
 }
 
 static void reset_state_on_reconnect(void)
 {
 	struct timeval __current;
+	int i;
+
 	gettimeofday(&__current, NULL);
 	state.xmit_seq = (__u16)rand();
 	state.last_recv = __current;
 	state.last_echo_recv = __current;
 	state.last_echo_sent = (struct timeval) { 0, 0 }; /* trigger the first echo */
 	state.last_health_assess = __current;
-	reset_health_assess_data();
+
+	/* Reset health assess variables */
+	state.has_pending_echo = false;
+	state.pending_echo_id = 0;
+
+	for (i = 0; i < STATS_DATA_BUCKETS; i++)
+		zero_stats_data(&state.stats_buckets[i]);
+	state.current_bucket = 0;
 }
 
 static bool do_link_health_assess(void)
 {
-	unsigned loss = state.total_echo_sent > 0 ?
-		((state.total_echo_sent - state.total_echo_rcvd) * 100 / state.total_echo_sent) : 0;
-	unsigned rtt = state.total_echo_rcvd > 0 ?
-		(unsigned)(state.total_rtt_ms / state.total_echo_rcvd) : 0;
+	unsigned sent = 0, rcvd = 0, rtt = 0;
+	unsigned loss_percent, rtt_average;
+	int i;
+
+	for (i = 0; i < STATS_DATA_BUCKETS; i++) {
+		struct stats_data *st = &state.stats_buckets[i];
+		sent += st->total_echo_sent;
+		rcvd += st->total_echo_rcvd;
+		rtt += st->total_rtt_ms;
+	}
+	/* Avoid generating negative values */
+	if (rcvd > sent)
+		rcvd = sent;
+	loss_percent = sent ? ((sent - rcvd) * 100 / sent) : 0;
+	rtt_average = rcvd ? (rtt / rcvd) : 0;
 
 	/* Write into file */
 	if (config.health_file) {
 		FILE *fp;
 		remove(config.health_file);
 		if ((fp = fopen(config.health_file, "w"))) {
-			fprintf(fp, "%u,%u,%u,%u\n", state.total_echo_sent, state.total_echo_rcvd,
-					loss, rtt);
+			fprintf(fp, "%u,%u,%u,%u\n", sent, rcvd, loss_percent, rtt_average);
 			fclose(fp);
 		}
 	} else {
 		syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u",
-				state.total_echo_sent, state.total_echo_rcvd, loss, rtt);
+				sent, rcvd, loss_percent, rtt_average);
 	}
 
-	reset_health_assess_data();
+	/* Move to the next bucket and clear it */
+	state.current_bucket = (state.current_bucket + 1) % STATS_DATA_BUCKETS;
+	zero_stats_data(&state.stats_buckets[state.current_bucket]);
 
 	/* FIXME: return an effective health state */
 	return true;
@@ -358,7 +370,7 @@ int run_client(const char *peer_addr_pair)
 		}
 
 		/* Calculate packet loss and RTT for a link health assess */
-		if (__sub_timeval_ms(&__current, &state.last_health_assess)
+		if ((unsigned)__sub_timeval_ms(&__current, &state.last_health_assess)
 				>= config.health_assess_timeo * 1000) {
 			state.last_health_assess = __current;
 			if (!do_link_health_assess())
@@ -366,14 +378,16 @@ int run_client(const char *peer_addr_pair)
 		}
 
 		/* Start an echo test */
-		if (state.sockfd >= 0 && __sub_timeval_ms(&__current, &state.last_echo_sent)
+		if (state.sockfd >= 0 &&
+			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_sent)
 				>= config.keepalive_timeo * 1000) {
 			do_an_echo_request();
 			state.last_echo_sent = __current;
 		}
 
 		/* Connection timed out, try to reconnect */
-		if (state.sockfd < 0 || __sub_timeval_ms(&__current, &state.last_echo_recv)
+		if (state.sockfd < 0 ||
+			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_recv)
 				>= config.reconnect_timeo * 1000) {
 reconnect:
 			/* Call link-down scripts */

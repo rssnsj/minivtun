@@ -62,7 +62,22 @@ struct minivtun_config {
 	bool dynamic_link;
 };
 
+/* Statistics data for health assess */
+struct stats_data {
+	unsigned total_echo_sent;
+	unsigned total_echo_rcvd;
+	unsigned long total_rtt_ms;
+};
+
+static inline void zero_stats_data(struct stats_data *st)
+{
+	st->total_echo_sent = 0;
+	st->total_echo_rcvd = 0;
+	st->total_rtt_ms = 0;
+}
+
 /* Status variables during VPN running */
+#define STATS_DATA_BUCKETS 9
 struct state_variables {
 	int tunfd;
 	int sockfd;
@@ -74,13 +89,13 @@ struct state_variables {
 	struct timeval last_echo_sent;
 	struct timeval last_echo_recv;
 	struct timeval last_health_assess;
+	bool is_link_ok;
+
+	/* Health assess data */
 	bool has_pending_echo;
 	__be32 pending_echo_id;
-	/* Health assess data */
-	unsigned total_echo_sent;
-	unsigned total_echo_rcvd;
-	unsigned long total_rtt_ms;
-	bool is_link_ok;
+	struct stats_data stats_buckets[STATS_DATA_BUCKETS];
+	unsigned current_bucket;
 
 	/* *** Server specific *** */
 	struct sockaddr_inx local_addr;
