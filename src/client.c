@@ -240,7 +240,7 @@ static void reset_state_on_reconnect(void)
 	state.has_pending_echo = false;
 	state.pending_echo_id = 0;
 
-	for (i = 0; i < STATS_DATA_BUCKETS; i++)
+	for (i = 0; i < config.nr_stats_buckets; i++)
 		zero_stats_data(&state.stats_buckets[i]);
 	state.current_bucket = 0;
 }
@@ -251,7 +251,7 @@ static bool do_link_health_assess(void)
 	unsigned loss_percent, rtt_average;
 	int i;
 
-	for (i = 0; i < STATS_DATA_BUCKETS; i++) {
+	for (i = 0; i < config.nr_stats_buckets; i++) {
 		struct stats_data *st = &state.stats_buckets[i];
 		sent += st->total_echo_sent;
 		rcvd += st->total_echo_rcvd;
@@ -272,12 +272,12 @@ static bool do_link_health_assess(void)
 			fclose(fp);
 		}
 	} else {
-		syslog(LOG_INFO, "Sent: %u, received: %u, loss: %u%%, average RTT: %u",
+		printf("Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
 				sent, rcvd, loss_percent, rtt_average);
 	}
 
 	/* Move to the next bucket and clear it */
-	state.current_bucket = (state.current_bucket + 1) % STATS_DATA_BUCKETS;
+	state.current_bucket = (state.current_bucket + 1) % config.nr_stats_buckets;
 	zero_stats_data(&state.stats_buckets[state.current_bucket]);
 
 	/* FIXME: return an effective health state */
@@ -288,6 +288,10 @@ int run_client(const char *peer_addr_pair)
 {
 	char s_peer_addr[50];
 	struct timeval startup_time;
+
+	/* Allocate statistics data buckets */
+	state.stats_buckets = malloc(sizeof(struct stats_data) * config.nr_stats_buckets);
+	assert(state.stats_buckets);
 
 	/* Remember the startup time for checking with 'config.exit_after' */
 	gettimeofday(&startup_time, NULL);
@@ -371,7 +375,7 @@ int run_client(const char *peer_addr_pair)
 
 		/* Calculate packet loss and RTT for a link health assess */
 		if ((unsigned)__sub_timeval_ms(&__current, &state.last_health_assess)
-				>= config.health_assess_timeo * 1000) {
+				>= config.health_assess_interval * 1000) {
 			state.last_health_assess = __current;
 			if (!do_link_health_assess())
 				goto reconnect;
@@ -380,7 +384,7 @@ int run_client(const char *peer_addr_pair)
 		/* Start an echo test */
 		if (state.sockfd >= 0 &&
 			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_sent)
-				>= config.keepalive_timeo * 1000) {
+				>= config.keepalive_interval * 1000) {
 			do_an_echo_request();
 			state.last_echo_sent = __current;
 		}

@@ -27,21 +27,15 @@ struct vt_route {
 };
 
 struct minivtun_config {
-	unsigned reconnect_timeo;
-	unsigned keepalive_timeo;
-	unsigned health_assess_timeo;
 	char ifname[40];
 	unsigned tun_mtu;
 	const char *crypto_passwd;
 	const char *pid_file;
-	const char *health_file;
 	bool in_background;
-	bool wait_dns;
+	bool tap_mode;
 
 	char crypto_key[CRYPTO_MAX_KEY_SIZE];
 	const void *crypto_type;
-
-	bool tap_mode;
 
 	/* IPv4 address settings */
 	struct in_addr tun_in_local;
@@ -56,10 +50,16 @@ struct minivtun_config {
 	struct vt_route *vt_routes;
 
 	/* Client only configuration */
-	int vt_metric;
-	char vt_table[32];
+	bool wait_dns;
 	unsigned exit_after;
 	bool dynamic_link;
+	unsigned reconnect_timeo;
+	unsigned keepalive_interval;
+	unsigned health_assess_interval;
+	unsigned nr_stats_buckets;
+	const char *health_file;
+	int vt_metric;
+	char vt_table[32];
 };
 
 /* Statistics data for health assess */
@@ -77,7 +77,6 @@ static inline void zero_stats_data(struct stats_data *st)
 }
 
 /* Status variables during VPN running */
-#define STATS_DATA_BUCKETS 9
 struct state_variables {
 	int tunfd;
 	int sockfd;
@@ -94,7 +93,7 @@ struct state_variables {
 	/* Health assess data */
 	bool has_pending_echo;
 	__be32 pending_echo_id;
-	struct stats_data stats_buckets[STATS_DATA_BUCKETS];
+	struct stats_data *stats_buckets;
 	unsigned current_bucket;
 
 	/* *** Server specific *** */

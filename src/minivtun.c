@@ -19,19 +19,21 @@
 #include "minivtun.h"
 
 struct minivtun_config config = {
-	.keepalive_timeo = 7,
-	.reconnect_timeo = 45,
-	.health_assess_timeo = 70,
 	.ifname = "",
 	.tun_mtu = 1300,
 	.crypto_passwd = "",
 	.crypto_type = NULL,
 	.pid_file = NULL,
-	.health_file = NULL,
-	.tap_mode = false,
 	.in_background = false,
+	.tap_mode = false,
 	.wait_dns = false,
+	.exit_after = 0,
 	.dynamic_link = false,
+	.reconnect_timeo = 47,
+	.keepalive_interval = 7,
+	.health_assess_interval = 60,
+	.nr_stats_buckets = 3,
+	.health_file = NULL,
 };
 
 struct state_variables state = {
@@ -146,24 +148,27 @@ static void print_help(int argc, char *argv[])
 	printf("Options:\n");
 	printf("  -l, --local <ip:port>               local IP:port for server to listen\n");
 	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
+	printf("  -n, --ifname <ifname>               virtual interface name\n");
+	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
 	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
-	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
-	printf("  -k, --keepalive <keepalive_timeo>   interval of keep-alive packets, default: %u\n", config.keepalive_timeo);
-	printf("  -n, --ifname <ifname>               virtual interface name\n");
+	printf("  -d, --daemon                        run as daemon process\n");
 	printf("  -p, --pidfile <pid_file>            PID file of the daemon\n");
+	printf("  -E, --tap                           TAP mode\n");
 	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
 	printf("  -t, --type <encryption_type>        encryption type\n");
 	printf("  -v, --route <network/prefix>[=gw]   attached IPv4/IPv6 route on this link, can be multiple\n");
+	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
+	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -M, --metric <metric>               metric of attached IPv4 routes\n");
 	printf("  -T, --table <table_name>            route table of the attached IPv4 routes\n");
 	printf("  -x, --exit-after <N>                force the client to exit after N seconds\n");
-	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
-	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
 	printf("  -H, --health-file <file_path>       file for writing real-time health data.\n");
-	printf("  -E, --tap                           TAP mode\n");
-	printf("  -d, --daemon                        run as daemon process\n");
+	printf("  -R, --reconnect <N>                 reconnect after idle for N seconds, default: %u\n", config.reconnect_timeo);
+	printf("  -K, --keepalive <N>                 seconds between keep-alive tests, default: %u\n", config.keepalive_interval);
+	printf("  -S, --health-assess <N>             seconds between health assess, default: %u\n", config.health_assess_interval);
+	printf("  -B, --stats-buckets <N>             health data buckets, default: %u\n", config.nr_stats_buckets);
 	printf("  -h, --help                          print this help\n");
 	printf("Supported encryption algorithms:\n");
 	printf("  ");
@@ -182,28 +187,31 @@ int main(int argc, char *argv[])
 	static struct option long_opts[] = {
 		{ "local", required_argument, 0, 'l', },
 		{ "remote", required_argument, 0, 'r', },
-		{ "health-file", required_argument, 0, 'H', },
 		{ "ipv4-addr", required_argument, 0, 'a', },
 		{ "ipv6-addr", required_argument, 0, 'A', },
-		{ "mtu", required_argument, 0, 'm', },
-		{ "keepalive", required_argument, 0, 'k', },
 		{ "ifname", required_argument, 0, 'n', },
+		{ "mtu", required_argument, 0, 'm', },
 		{ "pidfile", required_argument, 0, 'p', },
+		{ "daemon", no_argument, 0, 'd', },
+		{ "tap", no_argument, 0, 'E', },
 		{ "key", required_argument, 0, 'e', },
 		{ "type", required_argument, 0, 't', },
 		{ "route", required_argument, 0, 'v', },
-		{ "metric", required_argument, 0, 'M', },
-		{ "table", required_argument, 0, 'T', },
+		{ "wait-dns", no_argument, 0, 'w', },
 		{ "exit-after", required_argument, 0, 'x', },
 		{ "dynamic-link", no_argument, 0, 'D', },
-		{ "tap", no_argument, 0, 'E', },
-		{ "daemon", no_argument, 0, 'd', },
-		{ "wait-dns", no_argument, 0, 'w', },
+		{ "reconnect", required_argument, 0, 'R', },
+		{ "keepalive", required_argument, 0, 'K', },
+		{ "health-assess", required_argument, 0, 'S', },
+		{ "stats-buckets", required_argument, 0, 'B', },
+		{ "health-file", required_argument, 0, 'H', },
+		{ "metric", required_argument, 0, 'M', },
+		{ "table", required_argument, 0, 'T', },
 		{ "help", no_argument, 0, 'h', },
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:H:a:A:m:k:n:p:e:t:v:M:T:x:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:n:p:e:t:v:x:R:K:S:B:H:M:T:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -221,18 +229,21 @@ int main(int argc, char *argv[])
 		case 'A':
 			tun_ip6_config = optarg;
 			break;
-		case 'm':
-			override_mtu = strtoul(optarg, NULL, 10);
-			break;
-		case 'k':
-			config.keepalive_timeo = (unsigned)strtoul(optarg, NULL, 10);
-			break;
 		case 'n':
 			strncpy(config.ifname, optarg, sizeof(config.ifname) - 1);
 			config.ifname[sizeof(config.ifname) - 1] = '\0';
 			break;
+		case 'm':
+			override_mtu = strtoul(optarg, NULL, 10);
+			break;
 		case 'p':
 			config.pid_file = optarg;
+			break;
+		case 'd':
+			config.in_background = true;
+			break;
+		case 'E':
+			config.tap_mode = true;
 			break;
 		case 'e':
 			config.crypto_passwd = optarg;
@@ -243,27 +254,33 @@ int main(int argc, char *argv[])
 		case 'v':
 			parse_virtual_route(optarg);
 			break;
-		case 'M':
-			config.vt_metric = strtol(optarg, NULL, 0);
-			break;
-		case 'T':
-			strncpy(config.vt_table, optarg, sizeof(config.vt_table));
-			config.vt_table[sizeof(config.vt_table) - 1] = '\0';
+		case 'w':
+			config.wait_dns = true;
 			break;
 		case 'x':
-			config.exit_after = strtoul(optarg, NULL, 0);
+			config.exit_after = strtoul(optarg, NULL, 10);
 			break;
 		case 'D':
 			config.dynamic_link = true;
 			break;
-		case 'E':
-			config.tap_mode = true;
+		case 'R':
+			config.reconnect_timeo = strtoul(optarg, NULL, 10);
 			break;
-		case 'd':
-			config.in_background = true;
+		case 'K':
+			config.keepalive_interval = strtoul(optarg, NULL, 10);
 			break;
-		case 'w':
-			config.wait_dns = true;
+		case 'S':
+			config.health_assess_interval = strtoul(optarg, NULL, 10);
+			break;
+		case 'B':
+			config.nr_stats_buckets = strtoul(optarg, NULL, 10);
+			break;
+		case 'M':
+			config.vt_metric = strtol(optarg, NULL, 10);
+			break;
+		case 'T':
+			strncpy(config.vt_table, optarg, sizeof(config.vt_table));
+			config.vt_table[sizeof(config.vt_table) - 1] = '\0';
 			break;
 		case 'h':
 			print_help(argc, argv);
