@@ -278,14 +278,18 @@ static bool do_link_health_assess(void)
 			fclose(fp);
 		}
 	} else {
-		printf("Sent: %u, received: %u, dropped: %u%%, RTT: %u, healthy: %s\n",
-				sent, rcvd, drop_percent, rtt_average,
-				health_ok ? "yes" : "no");
+		printf("Sent: %u, received: %u, drop: %u%%, RTT: %u\n",
+				sent, rcvd, drop_percent, rtt_average);
 	}
 
 	/* Move to the next bucket and clear it */
 	state.current_bucket = (state.current_bucket + 1) % config.nr_stats_buckets;
 	zero_stats_data(&state.stats_buckets[state.current_bucket]);
+
+	if (!health_ok) {
+		syslog(LOG_INFO, "Unhealthy state - sent: %u, received: %u, drop: %u%%, RTT: %u",
+				sent, rcvd, drop_percent, rtt_average);
+	}
 
 	return health_ok;
 }
