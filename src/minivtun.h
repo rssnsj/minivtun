@@ -60,7 +60,7 @@ struct minivtun_config {
 	unsigned health_assess_interval;
 	unsigned nr_stats_buckets;
 	const char *health_file;
-	int vt_metric;
+	unsigned vt_metric;
 	char vt_table[32];
 };
 

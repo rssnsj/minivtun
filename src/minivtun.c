@@ -36,6 +36,8 @@ struct minivtun_config config = {
 	.health_assess_interval = 60,
 	.nr_stats_buckets = 3,
 	.health_file = NULL,
+	.vt_metric = 0,
+	.vt_table = "",
 };
 
 struct state_variables state = {
@@ -171,7 +173,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -K, --keepalive <N>                 seconds between keep-alive tests, default: %u\n", config.keepalive_interval);
 	printf("  -S, --health-assess <N>             seconds between health assess, default: %u\n", config.health_assess_interval);
 	printf("  -B, --stats-buckets <N>             health data buckets, default: %u\n", config.nr_stats_buckets);
-	printf("  -P, --max-droprate <0~100>          maximum allowed packet drop percentage, default: %u%%\n", config.max_droprate);
+	printf("  -P, --max-droprate <1~100>          maximum allowed packet drop percentage, default: %u%%\n", config.max_droprate);
 	printf("  -X, --max-rtt <N>                   maximum allowed echo delay (ms), default: unlimited\n");
 	printf("  -h, --help                          print this help\n");
 	printf("Supported encryption algorithms:\n");
@@ -283,12 +285,16 @@ int main(int argc, char *argv[])
 			break;
 		case 'P':
 			config.max_droprate = strtoul(optarg, NULL, 10);
+			if (config.max_droprate < 1 || config.max_droprate > 100) {
+				fprintf(stderr, "*** Acceptable '--max-droprate' values: 1~100.\n");
+				exit(1);
+			}
 			break;
 		case 'X':
 			config.max_rtt = strtoul(optarg, NULL, 10);
 			break;
 		case 'M':
-			config.vt_metric = strtol(optarg, NULL, 10);
+			config.vt_metric = strtoul(optarg, NULL, 10);
 			break;
 		case 'T':
 			strncpy(config.vt_table, optarg, sizeof(config.vt_table));
