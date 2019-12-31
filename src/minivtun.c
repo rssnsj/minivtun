@@ -30,6 +30,8 @@ struct minivtun_config config = {
 	.exit_after = 0,
 	.dynamic_link = false,
 	.reconnect_timeo = 47,
+	.max_droprate = 100,
+	.max_rtt = 0,
 	.keepalive_interval = 7,
 	.health_assess_interval = 60,
 	.nr_stats_buckets = 3,
@@ -159,16 +161,18 @@ static void print_help(int argc, char *argv[])
 	printf("  -e, --key <encryption_key>          shared password for data encryption\n");
 	printf("  -t, --type <encryption_type>        encryption type\n");
 	printf("  -v, --route <network/prefix>[=gw]   attached IPv4/IPv6 route on this link, can be multiple\n");
-	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started.\n");
+	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started\n");
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
 	printf("  -M, --metric <metric>               metric of attached IPv4 routes\n");
 	printf("  -T, --table <table_name>            route table of the attached IPv4 routes\n");
 	printf("  -x, --exit-after <N>                force the client to exit after N seconds\n");
-	printf("  -H, --health-file <file_path>       file for writing real-time health data.\n");
-	printf("  -R, --reconnect <N>                 reconnect after idle for N seconds, default: %u\n", config.reconnect_timeo);
+	printf("  -H, --health-file <file_path>       file for writing real-time health data\n");
+	printf("  -R, --reconnect-timeo <N>           maximum inactive time (seconds) before reconnect, default: %u\n", config.reconnect_timeo);
 	printf("  -K, --keepalive <N>                 seconds between keep-alive tests, default: %u\n", config.keepalive_interval);
 	printf("  -S, --health-assess <N>             seconds between health assess, default: %u\n", config.health_assess_interval);
 	printf("  -B, --stats-buckets <N>             health data buckets, default: %u\n", config.nr_stats_buckets);
+	printf("  -P, --max-droprate <0~100>          maximum allowed packet drop percentage, default: %u%%\n", config.max_droprate);
+	printf("  -X, --max-rtt <N>                   maximum allowed echo delay (ms), default: unlimited\n");
 	printf("  -h, --help                          print this help\n");
 	printf("Supported encryption algorithms:\n");
 	printf("  ");
@@ -205,13 +209,15 @@ int main(int argc, char *argv[])
 		{ "health-assess", required_argument, 0, 'S', },
 		{ "stats-buckets", required_argument, 0, 'B', },
 		{ "health-file", required_argument, 0, 'H', },
+		{ "max-droprate", required_argument, 0, 'P', },
+		{ "max-rtt", required_argument, 0, 'X', },
 		{ "metric", required_argument, 0, 'M', },
 		{ "table", required_argument, 0, 'T', },
 		{ "help", no_argument, 0, 'h', },
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:n:p:e:t:v:x:R:K:S:B:H:M:T:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:n:p:e:t:v:x:R:K:S:B:H:P:X:M:T:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -219,9 +225,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			peer_addr_pair = optarg;
-			break;
-		case 'H':
-			config.health_file = optarg;
 			break;
 		case 'a':
 			tun_ip_config = optarg;
@@ -274,6 +277,15 @@ int main(int argc, char *argv[])
 			break;
 		case 'B':
 			config.nr_stats_buckets = strtoul(optarg, NULL, 10);
+			break;
+		case 'H':
+			config.health_file = optarg;
+			break;
+		case 'P':
+			config.max_droprate = strtoul(optarg, NULL, 10);
+			break;
+		case 'X':
+			config.max_rtt = strtoul(optarg, NULL, 10);
 			break;
 		case 'M':
 			config.vt_metric = strtol(optarg, NULL, 10);

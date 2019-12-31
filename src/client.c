@@ -248,8 +248,8 @@ static void reset_state_on_reconnect(void)
 static bool do_link_health_assess(void)
 {
 	unsigned sent = 0, rcvd = 0, rtt = 0;
-	unsigned loss_percent, rtt_average;
-	int i;
+	unsigned drop_percent, rtt_average, i;
+	bool health_ok = true;
 
 	for (i = 0; i < config.nr_stats_buckets; i++) {
 		struct stats_data *st = &state.stats_buckets[i];
@@ -260,28 +260,34 @@ static bool do_link_health_assess(void)
 	/* Avoid generating negative values */
 	if (rcvd > sent)
 		rcvd = sent;
-	loss_percent = sent ? ((sent - rcvd) * 100 / sent) : 0;
+	drop_percent = sent ? ((sent - rcvd) * 100 / sent) : 0;
 	rtt_average = rcvd ? (rtt / rcvd) : 0;
+
+	if (drop_percent > config.max_droprate) {
+		health_ok = false;
+	} else if (config.max_rtt && rtt_average > config.max_rtt) {
+		health_ok = false;
+	}
 
 	/* Write into file */
 	if (config.health_file) {
 		FILE *fp;
 		remove(config.health_file);
 		if ((fp = fopen(config.health_file, "w"))) {
-			fprintf(fp, "%u,%u,%u,%u\n", sent, rcvd, loss_percent, rtt_average);
+			fprintf(fp, "%u,%u,%u,%u\n", sent, rcvd, drop_percent, rtt_average);
 			fclose(fp);
 		}
 	} else {
-		printf("Sent: %u, received: %u, loss: %u%%, average RTT: %u\n",
-				sent, rcvd, loss_percent, rtt_average);
+		printf("Sent: %u, received: %u, dropped: %u%%, RTT: %u, healthy: %s\n",
+				sent, rcvd, drop_percent, rtt_average,
+				health_ok ? "yes" : "no");
 	}
 
 	/* Move to the next bucket and clear it */
 	state.current_bucket = (state.current_bucket + 1) % config.nr_stats_buckets;
 	zero_stats_data(&state.stats_buckets[state.current_bucket]);
 
-	/* FIXME: return an effective health state */
-	return true;
+	return health_ok;
 }
 
 int run_client(const char *peer_addr_pair)
@@ -341,6 +347,7 @@ int run_client(const char *peer_addr_pair)
 		fd_set rset;
 		struct timeval __current, timeo;
 		int rc;
+		bool need_reconnect = false;
 
 		FD_ZERO(&rset);
 		FD_SET(state.tunfd, &rset);
@@ -373,26 +380,23 @@ int run_client(const char *peer_addr_pair)
 			exit(0);
 		}
 
-		/* Calculate packet loss and RTT for a link health assess */
-		if ((unsigned)__sub_timeval_ms(&__current, &state.last_health_assess)
-				>= config.health_assess_interval * 1000) {
-			state.last_health_assess = __current;
-			if (!do_link_health_assess())
-				goto reconnect;
-		}
-
-		/* Start an echo test */
-		if (state.sockfd >= 0 &&
-			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_sent)
-				>= config.keepalive_interval * 1000) {
-			do_an_echo_request();
-			state.last_echo_sent = __current;
-		}
-
-		/* Connection timed out, try to reconnect */
-		if (state.sockfd < 0 ||
-			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_recv)
+		/* Check connection status or reconnect */
+		if (state.sockfd < 0) {
+			need_reconnect = true;
+		} else if ((unsigned)__sub_timeval_ms(&__current, &state.last_echo_recv)
 				>= config.reconnect_timeo * 1000) {
+			need_reconnect = true;
+		} else {
+			/* Calculate packet loss and RTT for a link health assess */
+			if ((unsigned)__sub_timeval_ms(&__current, &state.last_health_assess)
+					>= config.health_assess_interval * 1000) {
+				state.last_health_assess = __current;
+				if (!do_link_health_assess())
+					need_reconnect = true;
+			}
+		}
+
+		if (need_reconnect) {
 reconnect:
 			/* Call link-down scripts */
 			if (state.is_link_ok) {
@@ -423,6 +427,14 @@ reconnect:
 		if (FD_ISSET(state.tunfd, &rset)) {
 			rc = tunnel_receiving();
 			assert(rc == 0);
+		}
+
+		/* Trigger an echo test */
+		if (state.sockfd >= 0 &&
+			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_sent)
+				>= config.keepalive_interval * 1000) {
+			do_an_echo_request();
+			state.last_echo_sent = __current;
 		}
 	}
 

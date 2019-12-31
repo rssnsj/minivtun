@@ -54,6 +54,8 @@ struct minivtun_config {
 	unsigned exit_after;
 	bool dynamic_link;
 	unsigned reconnect_timeo;
+	unsigned max_droprate;
+	unsigned max_rtt;
 	unsigned keepalive_interval;
 	unsigned health_assess_interval;
 	unsigned nr_stats_buckets;
