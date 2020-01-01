@@ -91,6 +91,7 @@ struct state_variables {
 	struct timeval last_echo_recv;
 	struct timeval last_health_assess;
 	bool is_link_ok;
+	bool health_based_link_up;
 
 	/* Health assess data */
 	bool has_pending_echo;

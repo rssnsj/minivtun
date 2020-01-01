@@ -86,11 +86,13 @@ static int network_receiving(void)
 
 	state.last_recv = __current;
 
-	/* Call link-up scripts */
-	if (!state.is_link_ok) {
-		if (config.dynamic_link)
-			handle_link_up();
-		state.is_link_ok = true;
+	if (!state.health_based_link_up) {
+		/* Call link-up scripts */
+		if (!state.is_link_ok) {
+			if (config.dynamic_link)
+				handle_link_up();
+			state.is_link_ok = true;
+		}
 	}
 
 	switch (nmsg->hdr.opcode) {
@@ -385,9 +387,8 @@ int run_client(const char *peer_addr_pair)
 		}
 
 		/* Check connection status or reconnect */
-		if (state.sockfd < 0) {
-			need_reconnect = true;
-		} else if ((unsigned)__sub_timeval_ms(&__current, &state.last_echo_recv)
+		if (state.sockfd < 0 ||
+			(unsigned)__sub_timeval_ms(&__current, &state.last_echo_recv)
 				>= config.reconnect_timeo * 1000) {
 			need_reconnect = true;
 		} else {
@@ -395,8 +396,19 @@ int run_client(const char *peer_addr_pair)
 			if ((unsigned)__sub_timeval_ms(&__current, &state.last_health_assess)
 					>= config.health_assess_interval * 1000) {
 				state.last_health_assess = __current;
-				if (!do_link_health_assess())
+				if (do_link_health_assess()) {
+					/* Call link-up scripts */
+					if (!state.is_link_ok) {
+						if (config.dynamic_link)
+							handle_link_up();
+						state.is_link_ok = true;
+					}
+					state.health_based_link_up = false;
+				} else {
 					need_reconnect = true;
+					/* Keep link down until next health assess passes */
+					state.health_based_link_up = true;
+				}
 			}
 		}
 
