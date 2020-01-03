@@ -189,6 +189,7 @@ int main(int argc, char *argv[])
 	const char *loc_addr_pair = NULL, *peer_addr_pair = NULL;
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
 	int override_mtu = 0, opt;
+	struct timeval current;
 
 	static struct option long_opts[] = {
 		{ "local", required_argument, 0, 'l', },
@@ -318,7 +319,8 @@ int main(int argc, char *argv[])
 	}
 
 	/* Random seed */
-	srand(getpid());
+	gettimeofday(&current, NULL);
+	srand(current.tv_sec ^ current.tv_usec ^ getpid());
 
 	if (config.ifname[0] == '\0')
 		strcpy(config.ifname, "mv%d");

@@ -134,8 +134,9 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 {
 	struct addrinfo hints, *result;
-	char host[51] = "", s_port[10] = "";
-	int port = 0, rc;
+	char host[51] = "", s_port[21] = "";
+	unsigned port = 0;
+	int rc;
 
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
@@ -146,25 +147,33 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 		return 0;
 	}
 
-	if (sscanf(pair, "[%50[^]]]:%d", host, &port) == 2) {
-	} else if (sscanf(pair, "%50[^:]:%d", host, &port) == 2) {
-	} else {
+	if (sscanf(pair, "[%50[^]]]:%20s", host, s_port) == 2 ||
+		sscanf(pair, "%50[^:]:%20s", host, s_port) == 2) {
+		unsigned end_port = 0;
+		if (sscanf(s_port, "%u-%u", &port, &end_port) == 2) {
+			/* Port range */
+			if (!(port > 0 && end_port >= port && end_port <= 65535))
+				return -EINVAL;
+			port += rand() % (end_port - port + 1);
+		} else {
+			/* Single port */
+			port = strtoul(s_port, NULL, 10);
+			if (port > 65535)
+				return -EINVAL;
+		}
+	} else  {
 		/**
 		 * Address with a single port number, usually for
 		 * local IPv4 listen address.
 		 * e.g., "10000" is considered as "0.0.0.0:10000"
 		 */
-		const char *sp;
-		for (sp = pair; *sp; sp++) {
-			if (!(*sp >= '0' && *sp <= '9'))
-				return -EINVAL;
-		}
-		sscanf(pair, "%d", &port);
 		strcpy(host, "0.0.0.0");
+		port = strtoul(pair, NULL, 10);
+		if (port > 65535)
+			return -EINVAL;
 	}
-	sprintf(s_port, "%d", port);
-	if (port <= 0 || port > 65535)
-		return -EINVAL;
+
+	sprintf(s_port, "%u", port);
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
