@@ -360,7 +360,7 @@ int run_client(const char *peer_addr_pair)
 		if (state.sockfd >= 0)
 			FD_SET(state.sockfd, &rset);
 
-		timeo = (struct timeval) { 1, 0 };
+		timeo = (struct timeval) { 0, 500000 };
 		rc = select((state.tunfd > state.sockfd ? state.tunfd : state.sockfd) + 1,
 				&rset, NULL, NULL, &timeo);
 		if (rc < 0) {
