@@ -131,12 +131,15 @@ void fill_with_string_md5sum(const char *in, void *out, size_t outlen)
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
-int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
+int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa,
+		bool *is_random_port)
 {
 	struct addrinfo hints, *result;
 	char host[51] = "", s_port[21] = "";
 	unsigned port = 0;
 	int rc;
+
+	*is_random_port = false;
 
 	/* Only getting an INADDR_ANY address. */
 	if (pair == NULL) {
@@ -155,6 +158,7 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 			if (!(port > 0 && end_port >= port && end_port <= 65535))
 				return -EINVAL;
 			port += rand() % (end_port - port + 1);
+			*is_random_port = true;
 		} else {
 			/* Single port */
 			port = strtoul(s_port, NULL, 10);
@@ -197,8 +201,9 @@ int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa)
 int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr)
 {
 	int sockfd, rc;
+	bool is_random_port = false;
 
-	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr)) < 0)
+	if ((rc = get_sockaddr_inx_pair(peer_addr_pair, peer_addr, &is_random_port)) < 0)
 		return rc;
 
 	if ((sockfd = socket(peer_addr->sa.sa_family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {

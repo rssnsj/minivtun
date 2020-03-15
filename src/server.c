@@ -684,9 +684,14 @@ static int tunnel_receiving(void)
 int run_server(const char *loc_addr_pair)
 {
 	char s_loc_addr[50];
+	bool is_random_port = false;
 
-	if (get_sockaddr_inx_pair(loc_addr_pair, &state.local_addr) < 0) {
+	if (get_sockaddr_inx_pair(loc_addr_pair, &state.local_addr, &is_random_port) < 0) {
 		fprintf(stderr, "*** Cannot resolve address pair '%s'.\n", loc_addr_pair);
+		return -1;
+	}
+	if (is_random_port) {
+		fprintf(stderr, "*** Port range is not allowed for server.\n");
 		return -1;
 	}
 

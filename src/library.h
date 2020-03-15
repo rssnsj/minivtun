@@ -99,7 +99,8 @@ static inline bool is_sockaddr_equal(const struct sockaddr_inx *a1,
 	return false;
 }
 
-int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa);
+int get_sockaddr_inx_pair(const char *pair, struct sockaddr_inx *sa,
+		bool *is_random_port);
 int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_addr);
 int tun_alloc(char *dev, bool tap_mode);
 
