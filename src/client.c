@@ -98,8 +98,8 @@ static int network_receiving(void)
 	switch (nmsg->hdr.opcode) {
 	case MINIVTUN_MSG_IPDATA:
 		if (config.tap_mode) {
-			/* No ethernet packet is shorter than 12 bytes. */
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
+			/* No ethernet packet is shorter than 14 bytes. */
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 14)
 				return 0;
 			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
 			nmsg->ipdata.proto = 0;
