@@ -163,7 +163,7 @@ static int tunnel_receiving(void)
 	ip_dlen = (size_t)rc - sizeof(struct tun_pi);
 
 	if (config.tap_mode) {
-		if (ip_dlen < 12)
+		if (ip_dlen < 14)
 			return 0;
 	} else {
 		/* We only accept IPv4 or IPv6 frames. */

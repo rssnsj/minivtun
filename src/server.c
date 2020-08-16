@@ -524,8 +524,8 @@ static int network_receiving(void)
 	case MINIVTUN_MSG_IPDATA:
 		if (config.tap_mode) {
 			af = AF_MACADDR;
-			/* No ethernet packet is shorter than 12 bytes. */
-			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 12)
+			/* No ethernet packet is shorter than 14 bytes. */
+			if (out_dlen < MINIVTUN_MSG_IPDATA_OFFSET + 14)
 				return 0;
 			nmsg->ipdata.proto = 0;
 			ip_dlen = out_dlen - MINIVTUN_MSG_IPDATA_OFFSET;
@@ -593,7 +593,7 @@ static int tunnel_receiving(void)
 	if (config.tap_mode) {
 		/* Ethernet frame */
 		af = AF_MACADDR;
-		if (ip_dlen < 12)
+		if (ip_dlen < 14)
 			return 0;
 	} else {
 		/* We only accept IPv4 or IPv6 frames. */
