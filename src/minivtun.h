@@ -29,6 +29,7 @@ struct vt_route {
 struct minivtun_config {
 	char ifname[40];
 	unsigned tun_mtu;
+	unsigned tun_qlen;
 	const char *crypto_passwd;
 	const char *pid_file;
 	bool in_background;

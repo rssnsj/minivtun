@@ -327,6 +327,18 @@ void ip_link_set_mtu(const char *ifname, unsigned mtu)
 	(void)system(cmd);
 }
 
+void ip_link_set_txqueue_len(const char *ifname, unsigned qlen)
+{
+	char cmd[128];
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	/* NOTICE: Untested for Mac / FreeBSD */
+	sprintf(cmd, "ifconfig %s txqueuelen %u", ifname, qlen);
+#else
+	sprintf(cmd, "ip link set dev %s txqueuelen %u", ifname, qlen);
+#endif
+	(void)system(cmd);
+}
+
 void ip_link_set_updown(const char *ifname, bool up)
 {
 	char cmd[256];

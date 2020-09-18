@@ -21,6 +21,7 @@
 struct minivtun_config config = {
 	.ifname = "",
 	.tun_mtu = 1300,
+	.tun_qlen = 1500, /* driver default: 500 */
 	.crypto_passwd = "",
 	.crypto_type = NULL,
 	.pid_file = NULL,
@@ -154,6 +155,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -r, --remote <host:port>            host:port of server to connect (brace with [] for bare IPv6)\n");
 	printf("  -n, --ifname <ifname>               virtual interface name\n");
 	printf("  -m, --mtu <mtu>                     set MTU size, default: %u.\n", config.tun_mtu);
+	printf("  -Q, --qlen <qlen>                   set TX queue length, default: %u\n", config.tun_qlen);
 	printf("  -a, --ipv4-addr <tun_lip/tun_rip>   pointopoint IPv4 pair of the virtual interface\n");
 	printf("                  <tun_lip/pfx_len>   IPv4 address/prefix length pair\n");
 	printf("  -A, --ipv6-addr <tun_ip6/pfx_len>   IPv6 address/prefix length pair\n");
@@ -198,6 +200,7 @@ int main(int argc, char *argv[])
 		{ "ipv6-addr", required_argument, 0, 'A', },
 		{ "ifname", required_argument, 0, 'n', },
 		{ "mtu", required_argument, 0, 'm', },
+		{ "qlen", required_argument, 0, 'Q', },
 		{ "pidfile", required_argument, 0, 'p', },
 		{ "daemon", no_argument, 0, 'd', },
 		{ "tap", no_argument, 0, 'E', },
@@ -220,7 +223,7 @@ int main(int argc, char *argv[])
 		{ 0, 0, 0, 0, },
 	};
 
-	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:n:p:e:t:v:x:R:K:S:B:H:P:X:M:T:DEdwh",
+	while ((opt = getopt_long(argc, argv, "r:l:a:A:m:Q:n:p:e:t:v:x:R:K:S:B:H:P:X:M:T:DEdwh",
 			long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'l':
@@ -241,6 +244,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'm':
 			override_mtu = strtoul(optarg, NULL, 10);
+			break;
+		case 'Q':
+			config.tun_qlen = strtoul(optarg, NULL, 10);
 			break;
 		case 'p':
 			config.pid_file = optarg;
@@ -400,6 +406,7 @@ int main(int argc, char *argv[])
 
 	/* Set proper MTU size, and link up */
 	ip_link_set_mtu(config.ifname, config.tun_mtu);
+	ip_link_set_txqueue_len(config.ifname, config.tun_qlen);
 	ip_link_set_updown(config.ifname, true);
 
 	if (enabled_encryption()) {
