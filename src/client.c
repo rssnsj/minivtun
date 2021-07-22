@@ -313,19 +313,19 @@ int run_client(const char *peer_addr_pair)
 	if (config.dynamic_link)
 		ip_link_set_updown(config.ifname, false);
 
-	if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
+	if (config.wait_dns) {
+		/* Connect later (state.sockfd < 0) */
+		state.sockfd = -1;
+		gettimeofday(&state.last_health_assess, NULL);
+		printf("Mini virtual tunneling client to '%s', interface: %s. \n",
+				peer_addr_pair, config.ifname);
+	} else if ((state.sockfd = resolve_and_connect(peer_addr_pair, &state.peer_addr)) >= 0) {
 		/* DNS resolve OK, start service normally */
 		reset_state_on_reconnect();
 		inet_ntop(state.peer_addr.sa.sa_family, addr_of_sockaddr(&state.peer_addr),
 				s_peer_addr, sizeof(s_peer_addr));
 		printf("Mini virtual tunneling client to %s:%u, interface: %s.\n",
 				s_peer_addr, ntohs(port_of_sockaddr(&state.peer_addr)), config.ifname);
-	} else if (state.sockfd == -EAGAIN && config.wait_dns) {
-		/* Connect later (state.sockfd < 0) */
-		gettimeofday(&state.last_health_assess, NULL);
-		printf("Mini virtual tunneling client, interface: %s. \n", config.ifname);
-		printf("WARNING: Connection to '%s' temporarily unavailable, "
-				"to be retried later.\n", peer_addr_pair);
 	} else if (state.sockfd == -EINVAL) {
 		fprintf(stderr, "*** Invalid address pair '%s'.\n", peer_addr_pair);
 		return -1;
