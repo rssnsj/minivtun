@@ -62,6 +62,7 @@ struct minivtun_config {
 	unsigned nr_stats_buckets;
 	const char *health_file;
 	unsigned vt_metric;
+	int metric_stepping; /* dynamic link route metric stepping factor */
 	char vt_table[32];
 };
 
@@ -93,6 +94,7 @@ struct state_variables {
 	struct timeval last_health_assess;
 	bool is_link_ok;
 	bool health_based_link_up;
+	unsigned rt_metric; /* current route metric */
 
 	/* Health assess data */
 	bool has_pending_echo;

@@ -38,6 +38,7 @@ struct minivtun_config config = {
 	.nr_stats_buckets = 3,
 	.health_file = NULL,
 	.vt_metric = 0,
+	.metric_stepping = 0,
 	.vt_table = "",
 };
 
@@ -167,7 +168,7 @@ static void print_help(int argc, char *argv[])
 	printf("  -v, --route <network/prefix>[=gw]   attached IPv4/IPv6 route on this link, can be multiple\n");
 	printf("  -w, --wait-dns                      wait for DNS resolve ready after service started\n");
 	printf("  -D, --dynamic-link                  dynamic link mode, not bring up until data received\n");
-	printf("  -M, --metric <metric>               metric of attached IPv4 routes\n");
+	printf("  -M, --metric <metric>[++stepping]   metric of attached IPv4 routes\n");
 	printf("  -T, --table <table_name>            route table of the attached IPv4 routes\n");
 	printf("  -x, --exit-after <N>                force the client to exit after N seconds\n");
 	printf("  -H, --health-file <file_path>       file for writing real-time health data\n");
@@ -192,6 +193,7 @@ int main(int argc, char *argv[])
 	const char *crypto_type = CRYPTO_DEFAULT_ALGORITHM;
 	int override_mtu = 0, opt;
 	struct timeval current;
+	char *sp;
 
 	static struct option long_opts[] = {
 		{ "local", required_argument, 0, 'l', },
@@ -301,7 +303,17 @@ int main(int argc, char *argv[])
 			config.max_rtt = strtoul(optarg, NULL, 10);
 			break;
 		case 'M':
-			config.vt_metric = strtoul(optarg, NULL, 10);
+			/* -M 200++5 */
+			if ((sp = strstr(optarg, "++"))) {
+				char s[16];
+				memcpy(s, optarg, sp - optarg);
+				s[sp - optarg] = '\0';
+				sp += 2;
+				config.vt_metric = strtoul(s, NULL, 10);
+				config.metric_stepping = strtol(sp, NULL, 10);
+			} else {
+				config.vt_metric = strtoul(optarg, NULL, 10);
+			}
 			break;
 		case 'T':
 			strncpy(config.vt_table, optarg, sizeof(config.vt_table));

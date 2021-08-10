@@ -22,9 +22,13 @@ static void handle_link_up(void)
 {
 	struct vt_route *rt;
 
-	syslog(LOG_INFO, "Link is up.");
-
 	ip_link_set_updown(config.ifname, true);
+
+	if (config.metric_stepping) {
+		syslog(LOG_INFO, "Link is up, metric: %u.", state.rt_metric);
+	} else {
+		syslog(LOG_INFO, "Link is up.");
+	}
 
 	/* Add IPv4 address if possible */
 	ip_addr_add_ipv4(config.ifname, &config.tun_in_local,
@@ -38,16 +42,19 @@ static void handle_link_up(void)
 		/* Attach the dynamic routes */
 		for (rt = config.vt_routes; rt; rt = rt->next) {
 			ip_route_add_ipvx(config.ifname, rt->af, &rt->network, rt->prefix,
-				config.vt_metric, config.vt_table[0] ? config.vt_table : NULL);
+				state.rt_metric, config.vt_table[0] ? config.vt_table : NULL);
 		}
 	}
 }
 
 static void handle_link_down(void)
 {
-	syslog(LOG_INFO, "Link is down.");
-
 	ip_link_set_updown(config.ifname, false);
+
+	/* Lower route priority of the link by adding the stepping factor */
+	state.rt_metric += config.metric_stepping;
+
+	syslog(LOG_INFO, "Link is down.");
 }
 
 static int network_receiving(void)
@@ -312,6 +319,9 @@ int run_client(const char *peer_addr_pair)
 	state.is_link_ok = false;
 	if (config.dynamic_link)
 		ip_link_set_updown(config.ifname, false);
+
+	/* Initial route metric */
+	state.rt_metric = config.vt_metric;
 
 	if (config.wait_dns) {
 		/* Connect later (state.sockfd < 0) */
