@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <openssl/evp.h>
 #include <openssl/md5.h>
+#include <net/route.h>
 
 #include "library.h"
 
@@ -266,109 +267,246 @@ int tun_alloc(char *dev, bool tap_mode)
 	return fd;
 }
 
+/* Like strncpy but make sure the resulting string is always 0 terminated. */
+static char *safe_strncpy(char *dst, const char *src, size_t size)
+{
+	dst[size - 1] = '\0';
+	return strncpy(dst, src, size - 1);
+}
+
+/* Set a certain interface flag. */
+static int __set_flag(int sockfd, const char *ifname, short flag)
+{
+	struct ifreq ifr;
+
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0) {
+		fprintf(stderr, "*** SIOCGIFFLAGS: %s.\n", strerror(errno));
+		return -1;
+	}
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ifr.ifr_flags |= flag;
+	if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
+		fprintf(stderr, "*** SIOCSIFFLAGS: %s.\n", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+/* Clear a certain interface flag. */
+static int __clr_flag(int sockfd, const char *ifname, short flag)
+{
+	struct ifreq ifr;
+
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0) {
+		fprintf(stderr, "*** SIOCGIFFLAGS: %s.\n", strerror(errno));
+		return -1;
+	}
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ifr.ifr_flags &= ~flag;
+	if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
+		fprintf(stderr, "*** SIOCSIFFLAGS: %s.\n", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+static int __set_ip_using(int sockfd, const char *name, int c,
+		const struct in_addr *addr)
+{
+	struct sockaddr_in sin;
+	struct ifreq ifr;
+
+	safe_strncpy(ifr.ifr_name, name, IFNAMSIZ);
+	memset(&sin, 0, sizeof(struct sockaddr));
+	sin.sin_family = AF_INET;
+	sin.sin_addr = *addr;
+	memcpy(&ifr.ifr_addr, &sin, sizeof(struct sockaddr));
+	if (ioctl(sockfd, c, &ifr) < 0)
+		return -1;
+	return 0;
+}
+
+static int __get_ifindex(const char *ifname)
+{
+	struct ifreq ifr;
+	int sockfd;
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return -1;
+	memset(&ifr, 0x0, sizeof(ifr));
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	if (ioctl(sockfd, SIOGIFINDEX, &ifr) < 0) {
+		close(sockfd);
+		return -1;
+	}
+	close(sockfd);
+	return ifr.ifr_ifindex;
+}
+
 void ip_addr_add_ipv4(const char *ifname, struct in_addr *local,
 		struct in_addr *peer, int prefix)
 {
-	char cmd[256];
+	int sockfd;
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return;
 	if (is_valid_unicast_in(local) && is_valid_unicast_in(peer)) {
-		char s1[64], s2[64];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "ifconfig %s %s %s 2>/dev/null", ifname,
-				inet_ntop(AF_INET, local, s1, sizeof(s1)),
-				inet_ntop(AF_INET, peer, s2, sizeof(s2)));
-#else
-		sprintf(cmd, "ip addr add %s peer %s dev %s 2>/dev/null",
-				inet_ntop(AF_INET, local, s1, sizeof(s1)),
-				inet_ntop(AF_INET, peer, s2, sizeof(s2)),
-				ifname);
-#endif
-		(void)system(cmd);
+		__set_ip_using(sockfd, ifname, SIOCSIFADDR, local);
+		__set_ip_using(sockfd, ifname, SIOCSIFDSTADDR, peer);
+		__set_flag(sockfd, ifname, IFF_POINTOPOINT | IFF_UP | IFF_RUNNING); /* same as ifconfig */
 	} else if (is_valid_unicast_in(local) && prefix > 0) {
-		char s1[64];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		char s2[64];
-		sprintf(cmd, "ifconfig %s %s %s 2>/dev/null", ifname,
-				inet_ntop(AF_INET, local, s1, sizeof(s1)),
-				inet_ntop(AF_INET, local, s2, sizeof(s2)));
-#else
-		sprintf(cmd, "ip addr add %s/%d dev %s 2>/dev/null",
-				inet_ntop(AF_INET, local, s1, sizeof(s1)),
-				prefix, ifname);
-#endif
-		(void)system(cmd);
+		struct in_addr mask;
+		mask.s_addr = htonl(~((1 << (32 - prefix)) - 1));
+		__set_ip_using(sockfd, ifname, SIOCSIFADDR, local);
+		__set_ip_using(sockfd, ifname, SIOCSIFNETMASK, &mask);
+		__set_flag(sockfd, ifname, IFF_UP | IFF_RUNNING); /* same as ifconfig */
 	}
+	close(sockfd);
 }
 
 void ip_addr_add_ipv6(const char *ifname, struct in6_addr *local, int prefix)
 {
-	char cmd[256];
-	if (is_valid_unicast_in6(local) && prefix > 0) {
-		char s1[64];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-		sprintf(cmd, "ifconfig %s inet6 %s/%d 2>/dev/null", ifname,
-				inet_ntop(AF_INET6, local, s1, sizeof(s1)), prefix);
-#else
-		sprintf(cmd, "ip -6 addr add %s/%d dev %s 2>/dev/null",
-				inet_ntop(AF_INET6, local, s1, sizeof(s1)),
-				prefix, ifname);
+#ifndef _LINUX_IN6_H
+	/* This is in linux/include/net/ipv6.h */
+	struct in6_ifreq {
+		struct in6_addr ifr6_addr;
+		__u32 ifr6_prefixlen;
+		unsigned int ifr6_ifindex;
+	};
 #endif
-		(void)system(cmd);
+	struct in6_ifreq ifr6;
+	int sockfd, ifindex;
+
+	if ((ifindex = __get_ifindex(ifname)) < 0) {
+		fprintf(stderr, "*** SIOGIFINDEX: %s.\n", strerror(errno));
+		return;
 	}
+	if ((sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0)
+		return;
+	if (is_valid_unicast_in6(local) && prefix > 0) {
+		memcpy(&ifr6.ifr6_addr, local, sizeof(*local));
+		ifr6.ifr6_ifindex = ifindex;
+		ifr6.ifr6_prefixlen = prefix;
+		if (ioctl(sockfd, SIOCSIFADDR, &ifr6) < 0)
+			fprintf(stderr, "*** SIOCSIFADDR: %s.\n", strerror(errno));
+	}
+	close(sockfd);
 }
 
 void ip_link_set_mtu(const char *ifname, unsigned mtu)
 {
-	char cmd[256];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "ifconfig %s mtu %u", ifname, mtu);
-#else
-	sprintf(cmd, "ip link set dev %s mtu %u", ifname, mtu);
-#endif
-	(void)system(cmd);
+	struct ifreq ifr;
+	int sockfd;
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return;
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ifr.ifr_mtu = mtu;
+	if (ioctl(sockfd, SIOCSIFMTU, &ifr) < 0)
+		fprintf(stderr, "*** SIOCSIFMTU, %u: %s.\n", mtu, strerror(errno));
+	close(sockfd);
 }
 
 void ip_link_set_txqueue_len(const char *ifname, unsigned qlen)
 {
-	char cmd[128];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	/* NOTICE: Untested for Mac / FreeBSD */
-	sprintf(cmd, "ifconfig %s txqueuelen %u", ifname, qlen);
-#else
-	sprintf(cmd, "ip link set dev %s txqueuelen %u", ifname, qlen);
-#endif
-	(void)system(cmd);
+	struct ifreq ifr;
+	int sockfd;
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return;
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ifr.ifr_qlen = qlen;
+	if (ioctl(sockfd, SIOCSIFTXQLEN, &ifr) < 0)
+		fprintf(stderr, "*** SIOCSIFTXQLEN: %s\n", strerror(errno));
+	close(sockfd);
 }
 
 void ip_link_set_updown(const char *ifname, bool up)
 {
-	char cmd[256];
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "ifconfig %s %s", ifname, up ? "up" : "down");
-#else
-	sprintf(cmd, "ip link set %s %s", ifname, up ? "up" : "down");
-#endif
-	(void)system(cmd);
+	int sockfd;
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return;
+	if (up) {
+		__set_flag(sockfd, ifname, IFF_UP | IFF_RUNNING);
+	} else {
+		__clr_flag(sockfd, ifname, IFF_UP);
+	}
+	close(sockfd);
 }
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 void ip_route_add_ipvx(const char *ifname, int af, void *network,
 		int prefix, int metric, const char *table)
 {
-	char cmd[256], __net[64] = "", __ip_sfx[40] = "";
-
+	char cmd[256], __net[64] = "";
 	inet_ntop(af, network, __net, sizeof(__net));
-	if (table)
-		sprintf(__ip_sfx, " table %s", table);
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	sprintf(cmd, "%s add -net %s/%d %s metric %d",
-			af == AF_INET6 ? "route -A inet6" : "route",
-			__net, prefix, ifname, metric);
-#else
-	sprintf(cmd, "%s route add %s/%d dev %s metric %d%s",
-			af == AF_INET6 ? "ip -6" : "ip", __net, prefix,
-			ifname, metric, __ip_sfx);
-#endif
+	sprintf(cmd, "route %s add -net %s/%d %s metric %d",
+		af == AF_INET6 ? "-A inet6" : "", __net, prefix, ifname, metric);
 	(void)system(cmd);
 }
+#else
+void ip_route_add_ipvx(const char *ifname, int af, void *network,
+		int prefix, int metric, const char *table)
+{
+	/* Fallback to 'ip route ...' if adding to another table */
+	if (table) {
+		char cmd[256], __net[64] = "";
+		inet_ntop(af, network, __net, sizeof(__net));
+		sprintf(cmd, "ip %s route add %s/%d dev %s metric %d table %s",
+			af == AF_INET6 ? "-6" : "", __net, prefix, ifname, metric, table);
+		(void)system(cmd);
+	} else 	if (af == AF_INET) {
+		/* IPv4 */
+		struct rtentry rt;
+		int sockfd;
+
+		memset(&rt, 0x0, sizeof(rt));
+		rt.rt_flags = RTF_UP;
+		if (prefix == 32)
+			rt.rt_flags |= RTF_HOST;
+		((struct sockaddr_in *)&rt.rt_dst)->sin_family = AF_INET;
+		((struct sockaddr_in *)&rt.rt_dst)->sin_addr = *(struct in_addr *)network;
+		((struct sockaddr_in *)&rt.rt_genmask)->sin_family = AF_INET;
+		((struct sockaddr_in *)&rt.rt_genmask)->sin_addr.s_addr =
+				prefix ? htonl(~((1 << (32 - prefix)) - 1)) : 0;
+		rt.rt_metric = metric + 1; /* +1 for binary compatibility! */
+		rt.rt_dev = (char *)ifname;
+		if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+			fprintf(stderr, "*** socket(): %s\n", strerror(errno));
+			return;
+		}
+		ioctl(sockfd, SIOCADDRT, &rt);
+		close(sockfd);
+	} else if (af == AF_INET6) {
+		/* IPv6 */
+		struct in6_rtmsg rt6;
+		int sockfd, ifindex;
+
+		if ((ifindex = __get_ifindex(ifname)) < 0) {
+			fprintf(stderr, "*** SIOGIFINDEX: %s.\n", strerror(errno));
+			return;
+		}
+
+		memset(&rt6, 0x0, sizeof(rt6));
+		memcpy(&rt6.rtmsg_dst, network, sizeof(struct in6_addr));
+		rt6.rtmsg_flags = RTF_UP;
+		if (prefix == 128)
+			rt6.rtmsg_flags |= RTF_HOST;
+		rt6.rtmsg_metric = metric;
+		rt6.rtmsg_dst_len = prefix;
+		rt6.rtmsg_ifindex = ifindex;
+
+		if ((sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0) {
+			fprintf(stderr, "*** socket(): %s\n", strerror(errno));
+			return;
+		}
+		ioctl(sockfd, SIOCADDRT, &rt6);
+		close(sockfd);
+	}
+}
+#endif
 
 void do_daemonize(void)
 {
