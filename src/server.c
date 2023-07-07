@@ -681,6 +681,10 @@ static int tunnel_receiving(void)
 	return 0;
 }
 
+static void usr1_signal_handler(int signum)
+{
+}
+
 int run_server(const char *loc_addr_pair)
 {
 	char s_loc_addr[50];
@@ -729,6 +733,8 @@ int run_server(const char *loc_addr_pair)
 
 	gettimeofday(&state.last_walk, NULL);
 
+	signal(SIGUSR1, usr1_signal_handler);
+
 	for (;;) {
 		fd_set rset;
 		struct timeval __current, timeo;
@@ -742,8 +748,12 @@ int run_server(const char *loc_addr_pair)
 		rc = select((state.tunfd > state.sockfd ? state.tunfd : state.sockfd) + 1,
 				&rset, NULL, NULL, &timeo);
 		if (rc < 0) {
-			fprintf(stderr, "*** select(): %s.\n", strerror(errno));
-			return -1;
+			if (errno == EINTR || errno == ERESTART) {
+				/* Fall through */
+			} else {
+				fprintf(stderr, "*** select(): %s.\n", strerror(errno));
+				return -1;
+			}
 		}
 
 		if (FD_ISSET(state.sockfd, &rset)) {
