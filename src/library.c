@@ -17,6 +17,14 @@
 #include <openssl/md5.h>
 #include <net/route.h>
 
+#ifdef __APPLE__
+// utun
+# include <sys/kern_event.h>
+# include <sys/kern_control.h>
+# define UTUN_CONTROL_NAME "com.apple.net.utun_control"
+# define UTUN_OPT_IFNAME 2
+#endif
+
 #include "library.h"
 
 struct name_cipher_pair cipher_pairs[] = {
@@ -220,18 +228,83 @@ int resolve_and_connect(const char *peer_addr_pair, struct sockaddr_inx *peer_ad
 	return sockfd;
 }
 
+#ifdef __APPLE__
+static int open_tun_socket(int utunnum, char *dev)
+{
+	struct sockaddr_ctl addr;
+	struct ctl_info info;
+	char ifname[10];
+	socklen_t ifname_len = sizeof(ifname);
+	int fd = -1;
+	int err = 0;
+
+	fd = socket (PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+	if (fd < 0)
+		return fd;
+
+	memset(&info, 0, sizeof(info));
+	strncpy(info.ctl_name, UTUN_CONTROL_NAME, MAX_KCTL_NAME);
+
+	err = ioctl(fd, CTLIOCGINFO, &info);
+	if (err != 0)
+		goto on_error;
+
+	addr.sc_len = sizeof(addr);
+	addr.sc_family = AF_SYSTEM;
+	addr.ss_sysaddr = AF_SYS_CONTROL;
+	addr.sc_id = info.ctl_id;
+	addr.sc_unit = utunnum + 1; /* specify ifname, 0 means auto */
+
+	err = connect(fd, (struct sockaddr *)&addr, sizeof (addr));
+	if (err != 0)
+		goto on_error;
+
+	err = getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, ifname, &ifname_len);
+	strncpy(dev, ifname, IFNAMSIZ);
+	if (err != 0)
+		goto on_error;
+
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (err != 0)
+		goto on_error;
+
+on_error:
+	if (err != 0) {
+		close(fd);
+		return err;
+	}
+
+	return fd;
+}
+#endif
+
 int tun_alloc(char *dev, bool tap_mode)
 {
 	int fd = -1, err;
-#if defined(__APPLE__) || defined(__FreeBSD__)
-	int b_enable = 1, i;
 
-	for (i = 0; i < 8; i++) {
+#if defined(__APPLE__)
+	int utunnum = -1;
+	if (strcmp(dev, "mv%d") != 0 && sscanf(dev, "utun%d", &utunnum) <= 0) {
+		return -EINVAL;
+	}
+	fd = open_tun_socket(utunnum, dev);
+	if (fd < 0)
+		return -EINVAL;
+
+#elif defined(__FreeBSD__)
+	int b_enable = 1, i;
+	if (strncmp(dev, "tun", 3) == 0) {
 		char dev_path[20];
-		sprintf(dev_path, "/dev/tun%d", i);
-		if ((fd = open(dev_path, O_RDWR)) >= 0) {
-			sprintf(dev, "tun%d", i);
-			break;
+		snprintf(dev_path, sizeof(dev_path), "/dev/%s", dev);
+		fd = open(dev_path, O_RDWR);
+	} else {
+		for (i = 0; i < 8; i++) {
+			char dev_path[20];
+			sprintf(dev_path, "/dev/tun%d", i);
+			if ((fd = open(dev_path, O_RDWR)) >= 0) {
+				sprintf(dev, "tun%d", i);
+				break;
+			}
 		}
 	}
 	if (fd < 0)

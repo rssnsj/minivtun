@@ -24,8 +24,6 @@ Compile and install
 
 ### Installation for Mac OS X
 
-Install TUNTAP driver for Mac OS X: http://tuntaposx.sourceforge.net/
-
 Compile and install
 
     git clone https://github.com/rssnsj/minivtun.git minivtun

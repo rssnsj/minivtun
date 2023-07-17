@@ -40,7 +40,11 @@ typedef char bool;
 
 /* Dummy types for ethernet mode */
 struct mac_addr { __u8 addr[6]; };
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#define AF_MACADDR PF_NDRV
+#else
 #define AF_MACADDR AF_PACKET
+#endif
 
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
